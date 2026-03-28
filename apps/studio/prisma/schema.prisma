@@ -995,3 +995,22 @@ model DailyBriefing {
   @@index([weeklyPlanId])
   @@map("daily_briefings")
 }
+
+model ImageGate {
+  id             String   @id @default(uuid())
+  agentRunId     String
+  topic          String
+  articleSummary String   @default("") @db.Text
+  candidates     Json     // ImageSearchResult[] — searched candidates
+  selectedUrls   String[] @default([])
+  status         String   @default("pending") // pending | selected | skipped
+  platforms      String[] @default([])
+  personaId      String?
+  pipelineRunId  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("image_gates")
+}

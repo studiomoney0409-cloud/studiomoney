@@ -29,7 +29,7 @@ import {
   growthAnalystDaily,
   growthAnalystWeekly,
 } from "@/lib/inngest/functions/growth-analyst";
-import { designDirectorRun } from "@/lib/inngest/functions/design-director";
+import { designDirectorRun, designDirectorWithImages } from "@/lib/inngest/functions/design-director";
 // Phase 4: Community Manager
 import { communityManagerScan } from "@/lib/inngest/functions/community-manager";
 
@@ -59,6 +59,7 @@ export const { GET, POST, PUT } = serve({
     growthAnalystDaily,
     growthAnalystWeekly,
     designDirectorRun,
+    designDirectorWithImages,
     // Phase 4: Community Manager
     communityManagerScan,
   ],

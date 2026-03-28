@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import OverviewApprovalQueue from "./OverviewApprovalQueue";
+import OverviewImageGate from "./OverviewImageGate";
 
 // ── Types ──────────────────────────────────────────
 
@@ -213,6 +214,9 @@ export default function Dashboard() {
 
       {/* Approval Queue */}
       <OverviewApprovalQueue />
+
+      {/* Image Selection Gate */}
+      <OverviewImageGate />
 
       {/* Growth Report Summary */}
       {growthReport && (

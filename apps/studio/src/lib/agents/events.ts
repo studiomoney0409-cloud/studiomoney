@@ -96,6 +96,29 @@ export interface AgentEvents {
       agentRunId: string;
     };
   };
+
+  // Image Gate — candidates ready for human review
+  "agent/image-gate.candidates-ready": {
+    data: {
+      imageGateId: string;
+      topic: string;
+      candidateCount: number;
+      agentRunId: string;
+    };
+  };
+
+  // Image Gate — human selected images, trigger Design Director
+  "agent/image-gate.selected": {
+    data: {
+      imageGateId: string;
+      topic: string;
+      selectedUrls: string[];
+      platforms: string[];
+      personaId?: string;
+      pipelineRunId?: string;
+      agentRunId: string;
+    };
+  };
 }
 
 /** Helper type to extract event names */

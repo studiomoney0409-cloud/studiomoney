@@ -6,6 +6,7 @@
 import { inngest } from "../client";
 import { runAgent } from "@/lib/agents/agent-runner";
 import { runContentProduction } from "@/lib/agents/content-producer";
+import { searchCandidateImages } from "@/lib/agents/image-curator";
 import type { DailyAssignment } from "@/lib/agents/types";
 
 /** Process daily assignments from Chief Editor. */
@@ -32,14 +33,29 @@ export const contentProducerRun = inngest.createFunction(
 
       results.push(result);
 
-      // Emit completion event for Design Director
+      // Search candidate images + create ImageGate for human selection
       if (result.success && result.data) {
+        await step.run(`image-search-${i}`, () =>
+          runAgent(
+            "content-producer",
+            (ctx) => searchCandidateImages(ctx, {
+              topic: assignment.topic,
+              articleSummary: result.data!.topic,
+              platforms: assignment.platforms || [],
+              personaId: assignment.personaId,
+              pipelineRunId: result.data!.pipelineRunId,
+            }),
+            { triggerType: "event", triggerRef: "image-search" },
+          ),
+        );
+
+        // Also emit content-producer.complete (for logging/tracking)
         await step.run(`emit-complete-${i}`, () =>
           inngest.send({
             name: "agent/content-producer.complete",
             data: {
               result: result.data!,
-              articleContent: "", // Design Director will fetch from pipeline run
+              articleContent: "",
               topic: assignment.topic,
               platforms: assignment.platforms || [],
               personaId: assignment.personaId,
@@ -74,6 +90,21 @@ export const contentProducerUrgent = inngest.createFunction(
     );
 
     if (result.success && result.data) {
+      // Search candidate images for urgent content too
+      await step.run("image-search-urgent", () =>
+        runAgent(
+          "content-producer",
+          (ctx) => searchCandidateImages(ctx, {
+            topic: assignment.topic,
+            articleSummary: result.data!.topic,
+            platforms: assignment.platforms || [],
+            personaId: assignment.personaId,
+            pipelineRunId: result.data!.pipelineRunId,
+          }),
+          { triggerType: "event", triggerRef: "image-search-urgent" },
+        ),
+      );
+
       await step.run("emit-complete", () =>
         inngest.send({
           name: "agent/content-producer.complete",

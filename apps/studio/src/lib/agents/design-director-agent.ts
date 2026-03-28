@@ -16,6 +16,7 @@ interface DesignDirectorInput {
   platforms: string[];
   personaId?: string;
   pipelineRunId?: string;
+  sourcedImageUrls?: string[];
 }
 
 export interface DesignDirectorResult {
@@ -102,10 +103,10 @@ export async function runDesignProduction(
   for (const platform of input.platforms) {
     try {
       // Generate brief (existing)
-      // Generate brief (existing)
       const brief = await generateDesignBrief({
         topic: input.topic,
         content,
+        sourcedImageUrls: input.sourcedImageUrls,
       });
 
       // Build minimal visual design input for refinement loop
