@@ -926,3 +926,72 @@ model BrandKit {
   @@index([userId])
   @@map("brand_kits")
 }
+
+// ─── Multi-Agent Autonomous System ──────────────────────
+
+model AgentRun {
+  id           String    @id @default(uuid())
+  agentName    String    // chief-editor | trend-scout | content-producer | design-director | growth-analyst | community-manager
+  triggerType  String    // cron | event | manual
+  triggerRef   String    @default("") // event name or cron expression
+  status       String    @default("running") // running | completed | failed
+  inputJson    Json?
+  outputJson   Json?
+  errorMessage String?   @db.Text
+  costUsd      Float     @default(0)
+  durationMs   Int       @default(0)
+  startedAt    DateTime  @default(now())
+  completedAt  DateTime?
+
+  logs         AgentLog[]
+
+  @@index([agentName, startedAt])
+  @@index([status])
+  @@map("agent_runs")
+}
+
+model AgentLog {
+  id         String   @id @default(uuid())
+  agentRunId String
+  run        AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  level      String   @default("info") // debug | info | warn | error
+  message    String   @db.Text
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([agentRunId])
+  @@map("agent_logs")
+}
+
+model WeeklyPlan {
+  id           String   @id @default(uuid())
+  weekStart    DateTime @db.Date
+  weekEnd      DateTime @db.Date
+  strategyJson Json     // { theme, goals, topicSlots, contentMix }
+  statusJson   Json?    // { completed, inProgress, cancelled }
+  agentRunId   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  briefings    DailyBriefing[]
+
+  @@index([weekStart])
+  @@map("weekly_plans")
+}
+
+model DailyBriefing {
+  id              String      @id @default(uuid())
+  date            DateTime    @db.Date
+  weeklyPlanId    String?
+  plan            WeeklyPlan? @relation(fields: [weeklyPlanId], references: [id])
+  assignmentsJson Json        // [{ topic, agentTarget, priority, persona, deadline }]
+  trendSummary    String      @default("") @db.Text
+  statusJson      Json?       // per-assignment status tracking
+  agentRunId      String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@unique([date])
+  @@index([weeklyPlanId])
+  @@map("daily_briefings")
+}

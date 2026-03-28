@@ -2,7 +2,12 @@ import { inngest } from "../client";
 import { commentFetchHandler } from "@/lib/jobs/handlers/commentFetch";
 import { commentMonitorHandler } from "@/lib/jobs/handlers/commentMonitor";
 
-/** Poll for new comments every 10 minutes. */
+/**
+ * Legacy comment fetch — kept for backward compatibility.
+ * Community Manager agent (communityManagerScan) now handles enhanced
+ * comment management with sentiment analysis and escalation.
+ * This function serves as a fallback if the agent system is disabled.
+ */
 export const commentFetch = inngest.createFunction(
   { id: "comment-fetch", retries: 2 },
   { cron: "*/10 * * * *" },

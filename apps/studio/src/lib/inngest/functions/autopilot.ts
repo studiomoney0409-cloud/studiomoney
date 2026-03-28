@@ -2,7 +2,11 @@ import { inngest } from "../client";
 import { prisma } from "@/lib/db";
 import { generateProposals, publishApprovedProposals } from "@/lib/autopilot/scanner";
 
-/** Autopilot scan: generate proposals + publish approved. Runs every 30 minutes. */
+/**
+ * Autopilot scan: generate proposals + publish approved. Runs every 30 minutes.
+ * NOTE: Trend scanning is now also handled by Trend Scout agent.
+ * This function continues to run for backward compatibility (direct autopilot configs).
+ */
 export const autopilotScan = inngest.createFunction(
   { id: "autopilot-scan", retries: 2 },
   { cron: "*/30 * * * *" },
