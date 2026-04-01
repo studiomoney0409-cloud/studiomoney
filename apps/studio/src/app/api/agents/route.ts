@@ -7,9 +7,15 @@ const AGENT_NAMES: AgentName[] = [
   "chief-editor",
   "trend-scout",
   "content-producer",
+  "copy-editor",
+  "seo-strategist",
+  "monetization-manager",
   "design-director",
   "growth-analyst",
   "community-manager",
+  "content-curator",
+  "newsletter-manager",
+  "partnership-manager",
 ];
 
 export async function GET() {
@@ -188,6 +194,26 @@ function summarizeOutput(agentName: AgentName, output: unknown): string {
       return `${(o.performance as { totalPosts?: number })?.totalPosts ?? 0}개 포스트, 비용 $${((o.cost as { totalUsd?: number })?.totalUsd ?? 0).toFixed(2)}`;
     case "community-manager":
       return `${o.repliesSent ?? 0}건 응답, ${(o.escalations as unknown[] ?? []).length}건 에스컬레이션`;
+    case "copy-editor":
+      return `판정: ${o.verdict ?? "?"} — ${o.issueCount ?? 0}건 이슈`;
+    case "seo-strategist":
+      return o.mode === "audit"
+        ? `감사: ${o.totalAudited ?? 0}개 포스트, ${o.issuesFound ?? 0}건 이슈`
+        : `최적화: "${(o.optimizedSeo as { seoTitle?: string })?.seoTitle ?? ""}"`;
+    case "monetization-manager":
+      return o.mode === "weekly-report"
+        ? `수익 ₩${((o.weeklyReport as { totalRevenue?: number })?.totalRevenue ?? 0).toLocaleString()}, ${((o.weeklyReport as { activeDealCount?: number })?.activeDealCount ?? 0)}건 딜`
+        : `제휴링크 ${(o.affiliateInsert as { linksInserted?: number })?.linksInserted ?? 0}개 삽입`;
+    case "content-curator":
+      return `스테일 ${(o.staleContent as unknown[] ?? []).length}건, 에버그린 ${(o.evergreenContent as unknown[] ?? []).length}건, 시리즈 ${(o.seriesConnections as unknown[] ?? []).length}건`;
+    case "newsletter-manager":
+      return o.status === "sent"
+        ? `"${o.subject}" → ${o.recipientCount ?? 0}명 발송`
+        : `상태: ${o.status ?? "unknown"}`;
+    case "partnership-manager":
+      return o.mode === "weekly-review"
+        ? `파트너 ${(o.weeklyReview as { activePartners?: number })?.activePartners ?? 0}개, 지연 ${((o.weeklyReview as { overdueTasks?: unknown[] })?.overdueTasks ?? []).length}건`
+        : `기회 ${(o.opportunities as unknown[] ?? []).length}건 발견`;
     default:
       return "";
   }

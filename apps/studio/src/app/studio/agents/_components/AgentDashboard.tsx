@@ -116,7 +116,7 @@ export default function AgentDashboard() {
         Agent Dashboard
       </h1>
       <p style={{ color: "var(--text-muted)", marginBottom: 24, fontSize: 14 }}>
-        6개 에이전트 실시간 모니터링 | 30초마다 자동 새로고침
+        12개 에이전트 실시간 모니터링 | 30초마다 자동 새로고침
       </p>
 
       {/* Cost Summary Bar */}
