@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 
-const OUTPUTS_DIR = path.resolve(process.cwd(), "../../outputs/reels/rendered");
+// Vercel serverless: only /tmp is writable/readable for dynamic files
+const OUTPUTS_DIR = process.env.VERCEL
+  ? path.join("/tmp", "reels-rendered")
+  : path.resolve(process.cwd(), "../../outputs/reels/rendered");
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -26,6 +29,9 @@ export async function GET(req: Request) {
       },
     });
   } catch {
-    return NextResponse.json({ error: "File not found" }, { status: 404 });
+    return NextResponse.json(
+      { error: process.env.VERCEL ? "File not found — ephemeral /tmp storage on Vercel. Configure R2 for persistent files." : "File not found" },
+      { status: 404 },
+    );
   }
 }

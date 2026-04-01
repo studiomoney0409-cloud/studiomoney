@@ -33,8 +33,9 @@ export const contentProducerRun = inngest.createFunction(
 
       results.push(result);
 
-      // Search candidate images + create ImageGate for human selection
+      // Post-production: image search + emit complete (image search is independent)
       if (result.success && result.data) {
+        // Image search runs as a separate step (non-blocking for emit)
         await step.run(`image-search-${i}`, () =>
           runAgent(
             "content-producer",
@@ -49,20 +50,30 @@ export const contentProducerRun = inngest.createFunction(
           ),
         );
 
-        // Also emit content-producer.complete (for logging/tracking)
-        await step.run(`emit-complete-${i}`, () =>
-          inngest.send({
+        // Load article content + emit in a single step (saves 1 step overhead)
+        await step.run(`emit-complete-${i}`, async () => {
+          let articleContent = "";
+          if (result.data!.pipelineRunId) {
+            const { prisma } = await import("@/lib/db");
+            const run = await prisma.pipelineRun.findUnique({
+              where: { id: result.data!.pipelineRunId! },
+              select: { editedContent: true, draftContent: true },
+            });
+            articleContent = run?.editedContent ?? run?.draftContent ?? "";
+          }
+
+          await inngest.send({
             name: "agent/content-producer.complete",
             data: {
               result: result.data!,
-              articleContent: "",
+              articleContent,
               topic: assignment.topic,
               platforms: assignment.platforms || [],
               personaId: assignment.personaId,
               agentRunId: result.runId,
             },
-          }),
-        );
+          });
+        });
       }
     }
 
@@ -105,19 +116,30 @@ export const contentProducerUrgent = inngest.createFunction(
         ),
       );
 
-      await step.run("emit-complete", () =>
-        inngest.send({
+      // Load article content + emit in a single step
+      await step.run("emit-complete", async () => {
+        let articleContent = "";
+        if (result.data!.pipelineRunId) {
+          const { prisma } = await import("@/lib/db");
+          const run = await prisma.pipelineRun.findUnique({
+            where: { id: result.data!.pipelineRunId! },
+            select: { editedContent: true, draftContent: true },
+          });
+          articleContent = run?.editedContent ?? run?.draftContent ?? "";
+        }
+
+        await inngest.send({
           name: "agent/content-producer.complete",
           data: {
             result: result.data!,
-            articleContent: "",
+            articleContent,
             topic: assignment.topic,
             platforms: assignment.platforms || [],
             personaId: assignment.personaId,
             agentRunId: result.runId,
           },
-        }),
-      );
+        });
+      });
     }
 
     return result;

@@ -53,6 +53,8 @@ export async function generateDraft(
     contentType?: ContentType;
     research?: ResearchPacket;
     editorFeedback?: string;
+    /** Override LLM model (default: gpt-4o for blog/review, gpt-4o-mini for sns/carousel) */
+    model?: string;
   },
 ): Promise<string> {
   const systemPrompt = buildSystemPrompt(opts?.persona ?? null, opts?.contentType ?? "blog");
@@ -92,11 +94,15 @@ Requirements:
 
 Return ONLY the markdown content.`;
 
+  // SNS/carousel use cheaper model (short-form content doesn't need gpt-4o quality)
+  const contentType = opts?.contentType ?? "blog";
+  const defaultModel = (contentType === "sns" || contentType === "carousel") ? "gpt-4o-mini" : "gpt-4o";
+
   return callGptSafe(userPrompt, {
     caller: "pipeline",
-    model: "gpt-4o",
+    model: opts?.model ?? defaultModel,
     temperature: 0.8,
-    maxTokens: 8000,
+    maxTokens: contentType === "sns" ? 2000 : 8000,
     timeoutMs: 120_000,
     systemPrompt,
   });

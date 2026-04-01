@@ -1,3 +1,6 @@
+// Vercel Pro: allow up to 60s for heavy SVG→PNG rendering
+export const maxDuration = 60;
+
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { Resvg } from "@resvg/resvg-js";

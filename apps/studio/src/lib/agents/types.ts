@@ -11,7 +11,13 @@ export type AgentName =
   | "content-producer"
   | "design-director"
   | "growth-analyst"
-  | "community-manager";
+  | "community-manager"
+  | "copy-editor"
+  | "seo-strategist"
+  | "newsletter-manager"
+  | "content-curator"
+  | "monetization-manager"
+  | "partnership-manager";
 
 export const AGENT_LABELS: Record<AgentName, string> = {
   "chief-editor": "편집장",
@@ -20,6 +26,12 @@ export const AGENT_LABELS: Record<AgentName, string> = {
   "design-director": "디자인 디렉터",
   "growth-analyst": "성장 분석가",
   "community-manager": "커뮤니티 매니저",
+  "copy-editor": "교정 에디터",
+  "seo-strategist": "SEO 전략가",
+  "newsletter-manager": "뉴스레터 매니저",
+  "content-curator": "콘텐츠 큐레이터",
+  "monetization-manager": "수익화 매니저",
+  "partnership-manager": "제휴 매니저",
 };
 
 // ── Agent Context ─────────────────────────────────────────
@@ -102,6 +114,7 @@ export interface UrgentAlert {
 
 export interface ContentProducerResult {
   pipelineRunId?: string;
+  blogPostId?: string;
   topic: string;
   qualityScore: number;
   autoApproved: boolean;
@@ -152,4 +165,123 @@ export interface CommunityReport {
   };
   contentIdeas: string[];
   escalations: string[];
+}
+
+// ── Copy Editor Outputs ──────────────────────────────────
+
+export interface CopyEditorResult {
+  crossArticleIssues: Array<{
+    type: "contradiction" | "duplication" | "tone-drift";
+    message: string;
+    relatedArticleId?: string;
+  }>;
+  verdict: "passed" | "needs-review" | "blocked";
+  blockReasons: string[];
+  issueCount: number;
+  publicationsUpdated: number;
+}
+
+// ── SEO Strategist Outputs ───────────────────────────────
+
+export interface SeoOptimizationResult {
+  mode: "pre-publish" | "audit";
+  optimizedSeo?: {
+    seoTitle: string;
+    seoDescription: string;
+    seoKeywords: string[];
+    internalLinks: Array<{ slug: string; anchorText: string; relevanceScore: number }>;
+    schemaOrg: Record<string, unknown>;
+    keywordDensity: Record<string, number>;
+  };
+  auditResults?: Array<{
+    blogPostId: string;
+    slug: string;
+    issues: Array<{ type: string; severity: "high" | "medium" | "low"; suggestion: string }>;
+    estimatedImpact: "high" | "medium" | "low";
+  }>;
+  totalAudited?: number;
+  issuesFound?: number;
+}
+
+// ── Newsletter Manager Outputs ───────────────────────────
+
+export interface NewsletterResult {
+  issueId: string;
+  subject: string;
+  subjectVariantB?: string;
+  articleCount: number;
+  recipientCount: number;
+  segmentsSent: number;
+  status: "sent" | "scheduled" | "failed";
+}
+
+// ── Content Curator Outputs ──────────────────────────────
+
+export interface ContentCuratorResult {
+  mode: "audit" | "link-new";
+  staleContent: Array<{
+    blogPostId: string;
+    slug: string;
+    daysSinceUpdate: number;
+    currentTraffic: number;
+    refreshPriority: "high" | "medium" | "low";
+    suggestedUpdates: string[];
+  }>;
+  evergreenContent: Array<{
+    blogPostId: string;
+    slug: string;
+    rePromotionSuggestion: string;
+    suggestedPlatforms: string[];
+  }>;
+  seriesConnections: Array<{
+    articles: Array<{ blogPostId: string; title: string }>;
+    seriesTheme: string;
+    similarityScore: number;
+  }>;
+  repurposingOpportunities: Array<{
+    sourceBlogPostId: string;
+    sourceFormat: string;
+    targetFormat: string;
+    reasoning: string;
+  }>;
+}
+
+// ── Monetization Manager Outputs ─────────────────────────
+
+export interface MonetizationResult {
+  mode: "weekly-report" | "affiliate-insert" | "roi-update";
+  weeklyReport?: {
+    totalRevenue: number;
+    bySource: Record<string, number>;
+    activeDealCount: number;
+    upcomingDeadlines: Array<{ dealId: string; sponsor: string; deadline: string }>;
+    topRoiContent: Array<{ blogPostId: string; roi: number; revenue: number; cost: number }>;
+    recommendations: string[];
+  };
+  affiliateInsert?: {
+    linksInserted: number;
+    affiliateIds: string[];
+  };
+}
+
+// ── Partnership Manager Outputs ──────────────────────────
+
+export interface PartnershipResult {
+  mode: "weekly-review" | "opportunity-scan";
+  weeklyReview?: {
+    activePartners: number;
+    inProgressCollabs: number;
+    pendingOutreach: number;
+    overdueTasks: Array<{ partnerId: string; task: string; daysOverdue: number }>;
+    upcomingReleases: Array<{ artistName: string; albumTitle: string; releaseDate: string }>;
+    recommendations: string[];
+  };
+  opportunities?: Array<{
+    entityName: string;
+    entityType: "artist" | "label" | "venue" | "festival";
+    trendVelocity: number;
+    existingRelationship: boolean;
+    suggestedApproach: string;
+    priority: "high" | "medium" | "low";
+  }>;
 }

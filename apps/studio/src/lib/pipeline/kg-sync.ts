@@ -1,5 +1,6 @@
 /**
  * Knowledge Graph sync — populates MusicArtist/Album/Track/Relations from Spotify API.
+ * Includes rate-limit detection and exponential backoff retry.
  */
 import { prisma } from "@/lib/db";
 import {
@@ -10,6 +11,34 @@ import {
   getAudioFeatures,
   getRelatedArtists,
 } from "./spotify";
+
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 1_000;
+
+/** Retry wrapper with exponential backoff for Spotify API rate limits. */
+async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      const isRateLimit =
+        err instanceof Error &&
+        (err.message.includes("429") || err.message.toLowerCase().includes("rate limit"));
+      const isTransient =
+        err instanceof Error &&
+        (err.message.includes("503") || err.message.includes("ECONNRESET"));
+
+      if ((isRateLimit || isTransient) && attempt < MAX_RETRIES) {
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+        console.warn(`[kg-sync] ${label}: retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(`[kg-sync] ${label}: max retries exceeded`);
+}
 
 export interface SyncResult {
   artist: { id: string; name: string; spotifyId: string };
@@ -22,7 +51,7 @@ export interface SyncResult {
  * Sync a single artist by name (searches Spotify, then syncs full data).
  */
 export async function syncArtistByName(name: string): Promise<SyncResult | null> {
-  const found = await searchArtist(name);
+  const found = await withRetry(() => searchArtist(name), `searchArtist(${name})`);
   if (!found) return null;
   return syncArtistBySpotifyId(found.id);
 }
@@ -32,7 +61,7 @@ export async function syncArtistByName(name: string): Promise<SyncResult | null>
  */
 export async function syncArtistBySpotifyId(spotifyId: string): Promise<SyncResult> {
   // 1. Upsert artist
-  const sp = await getArtist(spotifyId);
+  const sp = await withRetry(() => getArtist(spotifyId), `getArtist(${spotifyId})`);
   const artist = await prisma.musicArtist.upsert({
     where: { spotifyId },
     create: {
@@ -56,7 +85,7 @@ export async function syncArtistBySpotifyId(spotifyId: string): Promise<SyncResu
   });
 
   // 2. Sync albums
-  const spAlbums = await getArtistAlbums(spotifyId);
+  const spAlbums = await withRetry(() => getArtistAlbums(spotifyId), `getArtistAlbums(${spotifyId})`);
   let albumsSynced = 0;
 
   for (const spAlbum of spAlbums) {
@@ -98,16 +127,16 @@ export async function syncArtistBySpotifyId(spotifyId: string): Promise<SyncResu
     });
     if (!dbAlbum) continue;
 
-    const tracks = await getAlbumTracks(spAlbum.id);
+    const tracks = await withRetry(() => getAlbumTracks(spAlbum.id), `getAlbumTracks(${spAlbum.id})`);
     const trackIds = tracks.map((t) => t.id);
 
     // Batch audio features
     let featuresMap: Map<string, { danceability: number; energy: number; valence: number; tempo: number; acousticness: number; instrumentalness: number }> = new Map();
     try {
-      const features = await getAudioFeatures(trackIds);
+      const features = await withRetry(() => getAudioFeatures(trackIds), `getAudioFeatures(${spAlbum.id})`);
       featuresMap = new Map(features.map((f) => [f.id, f]));
     } catch {
-      // audio features endpoint may fail for some tracks
+      // audio features endpoint may fail for some tracks — non-fatal
     }
 
     for (const track of tracks) {
@@ -167,7 +196,7 @@ export async function syncArtistBySpotifyId(spotifyId: string): Promise<SyncResu
   // 4. Sync related artists (create shell records + relations)
   let relationsSynced = 0;
   try {
-    const related = await getRelatedArtists(spotifyId);
+    const related = await withRetry(() => getRelatedArtists(spotifyId), `getRelatedArtists(${spotifyId})`);
     for (const rel of related.slice(0, 10)) {
       // Upsert related artist as shell (minimal data)
       const relArtist = await prisma.musicArtist.upsert({

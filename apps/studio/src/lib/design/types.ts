@@ -280,6 +280,8 @@ export interface DesignEngineInput {
     sourceCount: number;            // how many trend sources mentioned this
     isExploration: boolean;         // exploration vs exploitation topic
   };
+  /** Performance-based style recommendation hint for the Design Director LLM */
+  styleHint?: string;
   skip?: {
     cardNews?: boolean;
     motionGraphic?: boolean;

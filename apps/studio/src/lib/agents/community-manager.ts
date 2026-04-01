@@ -6,6 +6,7 @@
  */
 import { commentFetchHandler } from "@/lib/jobs/handlers/commentFetch";
 import { commentMonitorHandler } from "@/lib/jobs/handlers/commentMonitor";
+import { notifySlack } from "@/lib/notify";
 import type { AgentContext, CommunityReport } from "./types";
 
 const NEGATIVE_SURGE_THRESHOLD = 0.30; // 30% negative = escalation
@@ -57,12 +58,23 @@ export async function runCommunityManagement(ctx: AgentContext): Promise<Communi
   const total = sentimentCounts.positive + sentimentCounts.neutral + sentimentCounts.negative;
   const negativeRatio = total > 0 ? sentimentCounts.negative / total : 0;
 
-  // 4. Escalation check
+  // 4. Escalation check + Slack notification
   const escalations: string[] = [];
   if (negativeRatio >= NEGATIVE_SURGE_THRESHOLD && total >= 5) {
     const escalationMsg = `Negative sentiment surge: ${(negativeRatio * 100).toFixed(0)}% (${sentimentCounts.negative}/${total} messages)`;
     escalations.push(escalationMsg);
     await ctx.log("warn", escalationMsg);
+
+    // Send Slack alert for negative sentiment surge
+    await notifySlack(
+      `:warning: [Community Manager] 부정 감성 급증 감지`,
+      {
+        negativeRatio: `${(negativeRatio * 100).toFixed(0)}%`,
+        negative: sentimentCounts.negative,
+        total,
+        runId: ctx.runId,
+      },
+    );
   }
 
   // 5. Content idea extraction — find repeated questions

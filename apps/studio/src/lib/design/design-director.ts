@@ -182,6 +182,17 @@ Mood keywords: ${st.moodKeywords.join(", ") || "none"}
 `;
   }
 
+  // Build performance-based style hint section
+  let styleHintSection = "";
+  if (input.styleHint) {
+    styleHintSection = `
+=== PERFORMANCE-BASED STYLE RECOMMENDATION ===
+${input.styleHint}
+→ These styles have shown the highest engagement rates in past designs. Prefer these unless the content clearly demands a different approach.
+=== END STYLE RECOMMENDATION ===
+`;
+  }
+
   const prompt = `You are a creative director for a Korean music/culture web magazine's design team.
 
 Analyze the content below and produce a design brief that will guide visual designers, motion designers, and data visualization agents.
@@ -191,7 +202,7 @@ Topic: ${input.topic}
 Content (first 1500 chars):
 ${contentSnippet}
 === END CONTENT ===
-${trendSection}${styleTokenSection}${imageSection}${input.referenceImageUrl ? `\nReference image URL provided: ${input.referenceImageUrl}\n(Note: You cannot see this image directly. Infer style from the URL path/filename if possible, otherwise focus on content analysis.)\n` : ""}
+${trendSection}${styleTokenSection}${styleHintSection}${imageSection}${input.referenceImageUrl ? `\nReference image URL provided: ${input.referenceImageUrl}\n(Note: You cannot see this image directly. Infer style from the URL path/filename if possible, otherwise focus on content analysis.)\n` : ""}
 Your job:
 1. Classify the content type (album_review, artist_spotlight, trending, data_insight, list_ranking, general)
 2. Determine the overall mood/emotion of the content (in Korean, e.g. "에너지틱하면서 세련된")

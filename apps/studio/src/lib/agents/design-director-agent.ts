@@ -102,11 +102,14 @@ export async function runDesignProduction(
 
   for (const platform of input.platforms) {
     try {
-      // Generate brief (existing)
+      // Generate brief with performance-based style hints
       const brief = await generateDesignBrief({
         topic: input.topic,
         content,
         sourcedImageUrls: input.sourcedImageUrls,
+        ...(preferredStyle && {
+          styleHint: `성과 기반 추천 스타일: typography=${preferredStyle.typographyMood}, layout=${preferredStyle.layoutStyle}. 가능하면 이 스타일을 우선 적용하세요.`,
+        }),
       });
 
       // Build minimal visual design input for refinement loop

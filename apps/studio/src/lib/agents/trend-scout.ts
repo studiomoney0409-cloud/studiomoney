@@ -5,10 +5,12 @@
  * Wraps existing: fetchTrends(), discoverTopics()
  */
 import { fetchTrends } from "@/lib/trends";
-import { discoverTopics } from "@/lib/pipeline/topic-intelligence";
+import { discoverTopics, type TopicBrief } from "@/lib/pipeline/topic-intelligence";
+import { cacheGetJSON, cacheSetJSON } from "@/lib/redis";
 import type { AgentContext, TrendBriefing, ScoredTopic, UrgentAlert } from "./types";
 
 const VELOCITY_URGENT_THRESHOLD = 80;
+const TOPIC_CACHE_TTL = 7200; // 2 hours — topics don't change faster than this
 
 export async function runTrendScout(ctx: AgentContext): Promise<TrendBriefing> {
   await ctx.log("info", "Starting trend scan");
@@ -24,13 +26,22 @@ export async function runTrendScout(ctx: AgentContext): Promise<TrendBriefing> {
   const { global, niche } = await fetchTrends(keywords.length > 0 ? keywords as string[] : undefined);
   await ctx.log("info", `Fetched ${global.length} global + ${niche.length} niche trends`);
 
-  // 3. Discover topics via topic intelligence (existing)
-  const topicBriefs = await discoverTopics({
-    keywords: keywords as string[],
-    count: 15,
-    brandContext: "한국 인디/밴드 음악 웹매거진. 타겟: 20-30대 음악 팬.",
-    audienceContext: "인디 공연을 다니고, 밴드 음악에 깊은 관심이 있는 사람들.",
-  });
+  // 3. Discover topics — cached for 2 hours to reduce LLM calls (~70% savings)
+  const cacheKey = `trend-scout:topics:${keywords.sort().join(",")}`;
+  let topicBriefs = await cacheGetJSON<TopicBrief[]>(cacheKey);
+
+  if (topicBriefs) {
+    await ctx.log("info", `Using cached topics (${topicBriefs.length} items)`);
+  } else {
+    topicBriefs = await discoverTopics({
+      keywords: keywords as string[],
+      count: 15,
+      brandContext: "한국 인디/밴드 음악 웹매거진. 타겟: 20-30대 음악 팬.",
+      audienceContext: "인디 공연을 다니고, 밴드 음악에 깊은 관심이 있는 사람들.",
+    });
+    await cacheSetJSON(cacheKey, topicBriefs, TOPIC_CACHE_TTL);
+    await ctx.log("info", `Discovered ${topicBriefs.length} topics (cached for ${TOPIC_CACHE_TTL}s)`);
+  }
 
   // 4. Velocity spike detection — compare with TrendSnapshot 24h ago
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);

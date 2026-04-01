@@ -1,5 +1,7 @@
-// Vercel Pro: allow up to 60s per step.run() invocation (LLM calls can take 10-30s)
-export const maxDuration = 60;
+// Vercel Pro: allow up to 300s for Inngest step.run() invocations
+// Content production pipeline chains multiple LLM calls (research→outline→write→edit)
+// which can take 60-120s total per step. Inngest manages retries externally.
+export const maxDuration = 300;
 
 import { serve } from "inngest/next";
 import { inngest } from "@/lib/inngest/client";
@@ -29,9 +31,20 @@ import {
   growthAnalystDaily,
   growthAnalystWeekly,
 } from "@/lib/inngest/functions/growth-analyst";
-import { designDirectorRun, designDirectorWithImages } from "@/lib/inngest/functions/design-director";
+import { designDirectorRun, designDirectorWithImages, designDirectorFromPipeline } from "@/lib/inngest/functions/design-director";
 // Phase 4: Community Manager
 import { communityManagerScan } from "@/lib/inngest/functions/community-manager";
+// Phase 5: Auto-publish + Feedback Loop
+import { autoPublishAfterDesign } from "@/lib/inngest/functions/auto-publish";
+import { feedbackLoop } from "@/lib/inngest/functions/feedback-loop";
+// Phase 6: Copy Editor → SEO → Monetization (publication pipeline gate)
+import { copyEditorGate } from "@/lib/inngest/functions/copy-editor";
+import { seoStrategistPrePublish, seoStrategistAudit } from "@/lib/inngest/functions/seo-strategist";
+import { monetizationAffiliateInsert, monetizationWeeklyReport } from "@/lib/inngest/functions/monetization-manager";
+// Phase 7: Content Curator + Newsletter + Partnership
+import { contentCuratorAudit, contentCuratorLinkNew } from "@/lib/inngest/functions/content-curator";
+import { newsletterWeeklyDigest } from "@/lib/inngest/functions/newsletter-manager";
+import { partnershipWeeklyReview, partnershipOpportunityScan } from "@/lib/inngest/functions/partnership-manager";
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
@@ -60,7 +73,23 @@ export const { GET, POST, PUT } = serve({
     growthAnalystWeekly,
     designDirectorRun,
     designDirectorWithImages,
+    designDirectorFromPipeline,
     // Phase 4: Community Manager
     communityManagerScan,
+    // Phase 5: Auto-publish after design + Feedback learning loop
+    autoPublishAfterDesign,
+    feedbackLoop,
+    // Phase 6: Copy Editor → SEO Strategist → Monetization Manager
+    copyEditorGate,
+    seoStrategistPrePublish,
+    seoStrategistAudit,
+    monetizationAffiliateInsert,
+    monetizationWeeklyReport,
+    // Phase 7: Content Curator + Newsletter + Partnership
+    contentCuratorAudit,
+    contentCuratorLinkNew,
+    newsletterWeeklyDigest,
+    partnershipWeeklyReview,
+    partnershipOpportunityScan,
   ],
 });

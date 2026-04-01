@@ -16,43 +16,49 @@ export async function runDailyAnalysis(ctx: AgentContext): Promise<GrowthReport>
   today.setHours(0, 0, 0, 0);
   const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
 
-  // 1. Collect due metrics (existing feedback collector)
-  const metricsResult = await collectDueMetrics().catch((err) => {
-    ctx.log("warn", `collectDueMetrics failed: ${err}`);
-    return { collected: 0, completed: 0 };
-  });
+  // 1-2. Run external collectors + all DB queries in parallel (~5-10s faster)
+  const [metricsResult, topicInsights, todayPerformance, costByAgent, budgetSetting, latestSnapshot, previousSnapshot] = await Promise.all([
+    // External collectors
+    collectDueMetrics().catch((err) => {
+      ctx.log("warn", `collectDueMetrics failed: ${err}`);
+      return { collected: 0, completed: 0 };
+    }),
+    analyzeTopicPerformance().catch((err) => {
+      ctx.log("warn", `analyzeTopicPerformance failed: ${err}`);
+      return { insights: [] as Array<{ trend: string; topic: string }>, totalArticles: 0 };
+    }),
+    // DB queries
+    ctx.prisma.postPerformance.findMany({
+      where: { snapshotAt: { gte: yesterday } },
+      select: {
+        views: true, likes: true, comments: true,
+        shares: true, saves: true, engagementRate: true, platform: true,
+      },
+    }),
+    ctx.prisma.llmUsageLog.groupBy({
+      by: ["caller"],
+      where: { createdAt: { gte: yesterday } },
+      _sum: { costUsd: true },
+    }),
+    ctx.prisma.setting.findUnique({
+      where: { key: "agent-budget-daily" },
+    }),
+    ctx.prisma.analyticsSnapshot.findFirst({
+      orderBy: { date: "desc" },
+      select: { followers: true },
+    }),
+    ctx.prisma.analyticsSnapshot.findFirst({
+      orderBy: { date: "desc" },
+      skip: 1,
+      select: { followers: true },
+    }),
+  ]);
+
   await ctx.log("info", `Collected ${metricsResult.collected} metrics, completed ${metricsResult.completed} runs`);
-
-  // 2. Run topic performance analysis (existing feedback analyzer)
-  const topicInsights = await analyzeTopicPerformance().catch((err) => {
-    ctx.log("warn", `analyzeTopicPerformance failed: ${err}`);
-    return { insights: [], totalArticles: 0 };
-  });
-
-  // 3. Query today's published post performance
-  const todayPerformance = await ctx.prisma.postPerformance.findMany({
-    where: { snapshotAt: { gte: yesterday } },
-    select: {
-      views: true,
-      likes: true,
-      comments: true,
-      shares: true,
-      saves: true,
-      engagementRate: true,
-      platform: true,
-    },
-  });
 
   const avgEngagement = todayPerformance.length > 0
     ? todayPerformance.reduce((sum: number, p) => sum + (p.engagementRate ?? 0), 0) / todayPerformance.length
     : 0;
-
-  // 4. Query LLM costs for today
-  const costByAgent = await ctx.prisma.llmUsageLog.groupBy({
-    by: ["caller"],
-    where: { createdAt: { gte: yesterday } },
-    _sum: { costUsd: true },
-  });
 
   const totalCost = costByAgent.reduce((sum: number, c) => sum + (c._sum.costUsd ?? 0), 0);
   const agentCosts: Record<string, number> = {};
@@ -60,10 +66,6 @@ export async function runDailyAnalysis(ctx: AgentContext): Promise<GrowthReport>
     agentCosts[c.caller ?? "unknown"] = c._sum.costUsd ?? 0;
   }
 
-  // 5. Query budget setting
-  const budgetSetting = await ctx.prisma.setting.findUnique({
-    where: { key: "agent-budget-daily" },
-  });
   const dailyBudget = budgetSetting ? parseFloat(String(budgetSetting.value)) : 30;
   const budgetUsedPercent = Math.round((totalCost / dailyBudget) * 100);
 
@@ -71,16 +73,6 @@ export async function runDailyAnalysis(ctx: AgentContext): Promise<GrowthReport>
     await ctx.log("warn", `Budget alert: ${budgetUsedPercent}% used ($${totalCost.toFixed(2)} / $${dailyBudget})`);
   }
 
-  // 6. Query follower changes
-  const latestSnapshot = await ctx.prisma.analyticsSnapshot.findFirst({
-    orderBy: { date: "desc" },
-    select: { followers: true },
-  });
-  const previousSnapshot = await ctx.prisma.analyticsSnapshot.findFirst({
-    orderBy: { date: "desc" },
-    skip: 1,
-    select: { followers: true },
-  });
   const currentFollowers = latestSnapshot?.followers ?? 0;
   const previousFollowers = previousSnapshot?.followers ?? currentFollowers;
   const followerChange = currentFollowers - previousFollowers;
@@ -161,33 +153,53 @@ export async function runWeeklyAnalysis(ctx: AgentContext): Promise<GrowthReport
 
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  // Aggregate weekly data
-  const weekPerformance = await ctx.prisma.postPerformance.findMany({
-    where: { snapshotAt: { gte: weekAgo } },
-    select: { engagementRate: true },
-  });
+  // Aggregate all weekly data in parallel
+  const [weekPerformance, weeklyCost, costByAgent, topicInsights, budgetSetting, latestSnap, weekAgoSnap] = await Promise.all([
+    ctx.prisma.postPerformance.findMany({
+      where: { snapshotAt: { gte: weekAgo } },
+      select: { engagementRate: true },
+    }),
+    ctx.prisma.llmUsageLog.aggregate({
+      where: { createdAt: { gte: weekAgo } },
+      _sum: { costUsd: true },
+    }),
+    ctx.prisma.llmUsageLog.groupBy({
+      by: ["caller"],
+      where: { createdAt: { gte: weekAgo } },
+      _sum: { costUsd: true },
+    }),
+    analyzeTopicPerformance().catch(() => ({ insights: [] as Array<{ trend: string; topic: string }>, totalArticles: 0 })),
+    ctx.prisma.setting.findUnique({
+      where: { key: "agent-budget-daily" },
+    }),
+    ctx.prisma.analyticsSnapshot.findFirst({
+      orderBy: { date: "desc" },
+      select: { followers: true },
+    }),
+    ctx.prisma.analyticsSnapshot.findFirst({
+      where: { date: { lte: weekAgo } },
+      orderBy: { date: "desc" },
+      select: { followers: true },
+    }),
+  ]);
 
   const avgEngagement = weekPerformance.length > 0
     ? weekPerformance.reduce((sum: number, p) => sum + (p.engagementRate ?? 0), 0) / weekPerformance.length
     : 0;
-
-  const weeklyCost = await ctx.prisma.llmUsageLog.aggregate({
-    where: { createdAt: { gte: weekAgo } },
-    _sum: { costUsd: true },
-  });
-
-  const costByAgent = await ctx.prisma.llmUsageLog.groupBy({
-    by: ["caller"],
-    where: { createdAt: { gte: weekAgo } },
-    _sum: { costUsd: true },
-  });
 
   const weeklyAgentCosts: Record<string, number> = {};
   for (const c of costByAgent) {
     weeklyAgentCosts[c.caller ?? "unknown"] = c._sum.costUsd ?? 0;
   }
 
-  const topicInsights = await analyzeTopicPerformance().catch(() => ({ insights: [], totalArticles: 0 }));
+  const dailyBudget = budgetSetting ? parseFloat(String(budgetSetting.value)) : 30;
+  const weeklyBudget = dailyBudget * 7;
+  const weeklyTotalCost = weeklyCost._sum.costUsd ?? 0;
+  const budgetUsedPercent = weeklyBudget > 0 ? Math.round((weeklyTotalCost / weeklyBudget) * 100) : 0;
+
+  const currentFollowers = latestSnap?.followers ?? 0;
+  const weekAgoFollowers = weekAgoSnap?.followers ?? currentFollowers;
+  const followerChange = currentFollowers - weekAgoFollowers;
 
   // Weekly recommendations via Claude Sonnet for strategic depth
   let recommendations: string[] = [];
@@ -202,8 +214,12 @@ export async function runWeeklyAnalysis(ctx: AgentContext): Promise<GrowthReport
 - 하락 주제: ${topicInsights.insights.filter((i) => i.trend === "declining").map((i) => i.topic).join(", ") || "없음"}
 
 ## 주간 비용
-- 총 LLM 비용: $${(weeklyCost._sum.costUsd ?? 0).toFixed(2)}
+- 총 LLM 비용: $${weeklyTotalCost.toFixed(2)} (주간 예산 $${weeklyBudget}의 ${budgetUsedPercent}%)
 - 에이전트별: ${JSON.stringify(weeklyAgentCosts)}
+
+## 팔로워
+- 현재: ${currentFollowers}
+- 주간 변화: ${followerChange > 0 ? "+" : ""}${followerChange}
 
 전략적 관점에서 3-5개 추천사항을 한국어로 작성하세요. 비용 최적화, 콘텐츠 전략, 성장 방안을 포함해주세요.`,
       {
@@ -231,11 +247,15 @@ export async function runWeeklyAnalysis(ctx: AgentContext): Promise<GrowthReport
       engagementTrend: avgEngagement > 0.05 ? "good" : avgEngagement > 0.02 ? "average" : "low",
     },
     cost: {
-      totalUsd: weeklyCost._sum.costUsd ?? 0,
+      totalUsd: weeklyTotalCost,
       byAgent: weeklyAgentCosts,
-      budgetUsedPercent: 0,
+      budgetUsedPercent,
     },
-    followers: { total: 0, change: 0, changePercent: 0 },
+    followers: {
+      total: currentFollowers,
+      change: followerChange,
+      changePercent: weekAgoFollowers > 0 ? Math.round((followerChange / weekAgoFollowers) * 10000) / 100 : 0,
+    },
     recommendations,
   };
 

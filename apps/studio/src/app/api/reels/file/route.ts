@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 
-const UPLOAD_DIR = path.resolve(process.cwd(), "../../outputs/reels/uploads");
+const UPLOAD_DIR = process.env.VERCEL
+  ? path.join("/tmp", "reels-uploads")
+  : path.resolve(process.cwd(), "../../outputs/reels/uploads");
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);

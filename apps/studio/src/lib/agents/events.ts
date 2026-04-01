@@ -9,6 +9,12 @@ import type {
   ContentProducerResult,
   GrowthReport,
   UrgentAlert,
+  CopyEditorResult,
+  SeoOptimizationResult,
+  ContentCuratorResult,
+  MonetizationResult,
+  PartnershipResult,
+  NewsletterResult,
 } from "./types";
 
 // ── Event Data Types ──────────────────────────────────────
@@ -116,6 +122,145 @@ export interface AgentEvents {
       platforms: string[];
       personaId?: string;
       pipelineRunId?: string;
+      agentRunId: string;
+    };
+  };
+
+  // ── Copy Editor Events ───────────────────────────────────
+
+  // Copy Editor → SEO Strategist (passed QA gate)
+  "agent/copy-editor.passed": {
+    data: {
+      articleContent: string;
+      topic: string;
+      platforms: string[];
+      pipelineRunId?: string;
+      personaId?: string;
+      publicationIds: string[];
+      blogPostId?: string;
+      agentRunId: string;
+    };
+  };
+
+  // Copy Editor → Chief Editor (blocked publication)
+  "agent/copy-editor.blocked": {
+    data: {
+      topic: string;
+      blockReasons: string[];
+      publicationIds: string[];
+      agentRunId: string;
+    };
+  };
+
+  // ── SEO Strategist Events ────────────────────────────────
+
+  // SEO Strategist → Monetization Manager (pre-publish optimization done)
+  "agent/seo-strategist.optimized": {
+    data: {
+      articleContent: string;
+      topic: string;
+      platforms: string[];
+      blogPostId?: string;
+      pipelineRunId?: string;
+      personaId?: string;
+      publicationIds: string[];
+      seoKeywords: string[];
+      agentRunId: string;
+    };
+  };
+
+  // SEO Strategist → Chief Editor + Content Curator (weekly audit)
+  "agent/seo-strategist.audit-complete": {
+    data: {
+      issuesFound: number;
+      highPriorityCount: number;
+      auditResults: SeoOptimizationResult["auditResults"];
+      agentRunId: string;
+    };
+  };
+
+  // ── Monetization Manager Events ──────────────────────────
+
+  // Monetization Manager → Design Director (affiliate links inserted)
+  "agent/monetization-manager.content-ready": {
+    data: {
+      articleContent: string;
+      topic: string;
+      platforms: string[];
+      blogPostId?: string;
+      pipelineRunId?: string;
+      personaId?: string;
+      publicationIds: string[];
+      affiliateLinksInserted: number;
+      agentRunId: string;
+    };
+  };
+
+  // Monetization Manager → Chief Editor (weekly revenue report)
+  "agent/monetization-manager.report": {
+    data: {
+      report: MonetizationResult["weeklyReport"];
+      agentRunId: string;
+    };
+  };
+
+  // ── Newsletter Manager Events ────────────────────────────
+
+  // Newsletter Manager → Growth Analyst (tracking)
+  "agent/newsletter-manager.sent": {
+    data: {
+      issueId: string;
+      recipientCount: number;
+      agentRunId: string;
+    };
+  };
+
+  // ── Content Curator Events ───────────────────────────────
+
+  // Content Curator → Chief Editor (schedule refreshes)
+  "agent/content-curator.refresh-needed": {
+    data: {
+      stalePostIds: string[];
+      evergreenPostIds: string[];
+      agentRunId: string;
+    };
+  };
+
+  // Content Curator → SEO Strategist (internal linking)
+  "agent/content-curator.series-found": {
+    data: {
+      series: Array<{ articleIds: string[]; theme: string }>;
+      agentRunId: string;
+    };
+  };
+
+  // Content Curator → Content Producer (SNS re-promotion)
+  "agent/content-curator.re-promote": {
+    data: {
+      blogPostId: string;
+      suggestedPlatforms: string[];
+      suggestion: string;
+      agentRunId: string;
+    };
+  };
+
+  // ── Partnership Manager Events ───────────────────────────
+
+  // Partnership Manager → Chief Editor (weekly review)
+  "agent/partnership-manager.review": {
+    data: {
+      review: PartnershipResult["weeklyReview"];
+      agentRunId: string;
+    };
+  };
+
+  // Partnership Manager → Chief Editor (new opportunity)
+  "agent/partnership-manager.opportunity": {
+    data: {
+      entityName: string;
+      entityType: string;
+      priority: string;
+      suggestedApproach: string;
       agentRunId: string;
     };
   };

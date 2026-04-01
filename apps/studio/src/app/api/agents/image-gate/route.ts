@@ -42,14 +42,29 @@ export async function PATCH(req: Request) {
     },
   });
 
-  // If selected, trigger Design Director via Inngest event
+  // Trigger Design Director via Inngest event
   if (newStatus === "selected" && urls.length > 0) {
+    // Preferred path: design with selected images
     await inngest.send({
       name: "agent/image-gate.selected",
       data: {
         imageGateId: id,
         topic: gate.topic,
         selectedUrls: urls,
+        platforms: gate.platforms,
+        personaId: gate.personaId,
+        pipelineRunId: gate.pipelineRunId,
+        agentRunId: gate.agentRunId,
+      },
+    });
+  } else if (newStatus === "skipped") {
+    // Skipped: proceed without images (trigger fallback design)
+    await inngest.send({
+      name: "agent/image-gate.selected",
+      data: {
+        imageGateId: id,
+        topic: gate.topic,
+        selectedUrls: [],
         platforms: gate.platforms,
         personaId: gate.personaId,
         pipelineRunId: gate.pipelineRunId,

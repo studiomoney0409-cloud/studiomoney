@@ -3,7 +3,10 @@ import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 
-const UPLOAD_DIR = path.resolve(process.cwd(), "../../outputs/reels/uploads");
+// Vercel serverless: only /tmp is writable. Use /tmp for local fallback.
+const UPLOAD_DIR = process.env.VERCEL
+  ? path.join("/tmp", "reels-uploads")
+  : path.resolve(process.cwd(), "../../outputs/reels/uploads");
 
 export async function POST(req: Request) {
   try {
@@ -20,7 +23,7 @@ export async function POST(req: Request) {
     const buffer = Buffer.from(await file.arrayBuffer());
     const ext = path.extname(file.name) || ".mp4";
 
-    // Use R2 if configured, otherwise fall back to local
+    // Use R2 if configured (recommended for production)
     if (process.env.R2_ENDPOINT) {
       const { uploadFile } = await import("@/lib/storage");
       const key = `reels/${Date.now()}-${crypto.randomUUID()}${ext}`;
@@ -28,7 +31,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ url, filename: key });
     }
 
-    // Local fallback
+    // Local/tmp fallback (files are ephemeral on Vercel)
     await fs.mkdir(UPLOAD_DIR, { recursive: true });
     const id = crypto.randomBytes(8).toString("hex");
     const filename = `${id}${ext}`;
@@ -36,7 +39,11 @@ export async function POST(req: Request) {
     await fs.writeFile(filePath, buffer);
 
     const url = `/api/reels/file?name=${encodeURIComponent(filename)}`;
-    return NextResponse.json({ url, filename });
+    return NextResponse.json({
+      url,
+      filename,
+      ...(process.env.VERCEL && { warning: "File stored in /tmp — ephemeral on Vercel. Configure R2_ENDPOINT for persistent storage." }),
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 500 });

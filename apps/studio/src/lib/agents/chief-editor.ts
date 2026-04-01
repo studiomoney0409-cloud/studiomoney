@@ -7,6 +7,7 @@
  *   3. Emergency Response (event-triggered) — handle breaking trends
  */
 import { callGptJson } from "@/lib/llm";
+import { cacheGetJSON, cacheSetJSON } from "@/lib/redis";
 import { z } from "zod";
 import type {
   AgentContext,
@@ -17,6 +18,8 @@ import type {
   TrendBriefing,
 } from "./types";
 
+const TOPIC_PERF_CACHE_TTL = 21600; // 6 hours — topic performance changes slowly
+
 // ── Weekly Strategy ───────────────────────────────────────
 
 export async function runWeeklyStrategy(ctx: AgentContext): Promise<{
@@ -25,41 +28,46 @@ export async function runWeeklyStrategy(ctx: AgentContext): Promise<{
 }> {
   await ctx.log("info", "Starting weekly strategy generation");
 
-  // 1. Get latest Growth Analyst report
-  const latestGrowthRun = await ctx.prisma.agentRun.findFirst({
-    where: { agentName: "growth-analyst", status: "completed" },
-    orderBy: { completedAt: "desc" },
-    select: { outputJson: true },
-  });
-  const growthReport = latestGrowthRun?.outputJson as GrowthReport | null;
-
-  // 2. Get topic performance trends
-  const topicPerformance = await ctx.prisma.topicPerformance.findMany({
-    orderBy: { avgEngagement: "desc" },
-    take: 20,
-  });
-
-  const risingTopics = topicPerformance.slice(0, 5).map((t) => t.topic); // top engagement
-  const decliningTopics = topicPerformance.slice(-5).map((t) => t.topic); // bottom engagement
-
-  // 3. Get recent content to avoid repetition
+  // 1-5. Fetch all context data in parallel (~2-3s faster than sequential)
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const recentContent = await ctx.prisma.pipelineRun.findMany({
-    where: { createdAt: { gte: weekAgo } },
-    select: { topic: true, contentType: true, status: true },
-    take: 30,
-  });
 
-  // 4. Get active personas
-  const personas = await ctx.prisma.writingPersona.findMany({
-    where: { isActive: true },
-    select: { id: true, name: true, styleFingerprint: true, expertiseAreas: true },
-  });
+  // topicPerformance cached for 6h (changes slowly, queried frequently)
+  const cachedTopicPerf = await cacheGetJSON<Array<{ topic: string; avgEngagement: number }>>("chief-editor:topic-perf");
 
-  // 5. Get active SNS accounts for platform targeting
-  const accounts = await ctx.prisma.snsAccount.findMany({
-    select: { platform: true, displayName: true },
-  });
+  const [latestGrowthRun, topicPerformance, recentContent, personas, accounts] = await Promise.all([
+    ctx.prisma.agentRun.findFirst({
+      where: { agentName: "growth-analyst", status: "completed" },
+      orderBy: { completedAt: "desc" },
+      select: { outputJson: true },
+    }),
+    cachedTopicPerf
+      ? Promise.resolve(cachedTopicPerf)
+      : ctx.prisma.topicPerformance.findMany({
+          orderBy: { avgEngagement: "desc" },
+          take: 20,
+        }).then(async (data) => {
+          await cacheSetJSON("chief-editor:topic-perf", data, TOPIC_PERF_CACHE_TTL);
+          return data;
+        }),
+    ctx.prisma.pipelineRun.findMany({
+      where: { createdAt: { gte: weekAgo } },
+      select: { topic: true, contentType: true, status: true },
+      take: 30,
+    }),
+    ctx.prisma.writingPersona.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, styleFingerprint: true, expertiseAreas: true },
+    }),
+    ctx.prisma.snsAccount.findMany({
+      select: { platform: true, displayName: true },
+    }),
+  ]);
+
+  const growthReport = latestGrowthRun?.outputJson as GrowthReport | null;
+  const risingTopics = topicPerformance.slice(0, 5).map((t) => t.topic);
+  const decliningTopics = topicPerformance.length > 5
+    ? topicPerformance.slice(-5).map((t) => t.topic)
+    : [];
   const platforms = [...new Set(accounts.map((a) => a.platform))];
 
   // 6. Generate strategy via Claude Sonnet
@@ -157,32 +165,32 @@ export async function runDailyBriefing(ctx: AgentContext): Promise<{
   today.setHours(0, 0, 0, 0);
   const dayOfWeek = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"][today.getDay()];
 
-  // 1. Load current weekly plan
-  const weeklyPlan = await ctx.prisma.weeklyPlan.findFirst({
-    where: { weekStart: { lte: today }, weekEnd: { gte: today } },
-    orderBy: { createdAt: "desc" },
-  });
+  // 1-3. Fetch weekly plan, trend briefing, yesterday's briefing in parallel
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  const [weeklyPlan, latestTrendRun, yesterdayBriefing] = await Promise.all([
+    ctx.prisma.weeklyPlan.findFirst({
+      where: { weekStart: { lte: today }, weekEnd: { gte: today } },
+      orderBy: { createdAt: "desc" },
+    }),
+    ctx.prisma.agentRun.findFirst({
+      where: { agentName: "trend-scout", status: "completed" },
+      orderBy: { completedAt: "desc" },
+      select: { outputJson: true },
+    }),
+    ctx.prisma.dailyBriefing.findUnique({
+      where: { date: yesterday },
+    }),
+  ]);
 
   const strategy = weeklyPlan?.strategyJson as WeeklyStrategy | null;
   const todaySlots: ContentSlot[] = strategy?.contentSlots.filter(
     (s) => s.day.toLowerCase() === dayOfWeek,
   ) ?? [];
 
-  // 2. Get latest trend scout briefing
-  const latestTrendRun = await ctx.prisma.agentRun.findFirst({
-    where: { agentName: "trend-scout", status: "completed" },
-    orderBy: { completedAt: "desc" },
-    select: { outputJson: true },
-  });
   const trendBriefing = latestTrendRun?.outputJson as TrendBriefing | null;
   const trendSummary = trendBriefing?.topics.slice(0, 5).map((t) => `- ${t.topic} (score: ${t.score.toFixed(2)})`).join("\n") ?? "트렌드 데이터 없음";
-
-  // 3. Check yesterday's completion
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayBriefing = await ctx.prisma.dailyBriefing.findUnique({
-    where: { date: yesterday },
-  });
 
   const missedFromYesterday: DailyAssignment[] = [];
   if (yesterdayBriefing) {

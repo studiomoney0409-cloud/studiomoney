@@ -1,9 +1,10 @@
 /**
  * Design Director Agent — Inngest Functions
  *
- * Two triggers:
- * 1. agent/content-producer.complete — direct (no images, fallback)
- * 2. agent/image-gate.selected — after human selects images (preferred)
+ * Three triggers:
+ * 1. agent/monetization-manager.content-ready — after full pipeline gate (Copy Editor → SEO → Monetization)
+ * 2. agent/image-gate.selected — after human selects images (preferred path, bypasses gate chain)
+ * 3. agent/content-producer.complete — legacy fallback (kept for backward compatibility)
  */
 import { inngest } from "../client";
 import { runAgent } from "@/lib/agents/agent-runner";
@@ -68,7 +69,79 @@ export const designDirectorWithImages = inngest.createFunction(
   },
 );
 
-/** Fallback: generate designs without images (from content-producer.complete). */
+/** Primary: generate designs after monetization pipeline gate completes. */
+export const designDirectorFromPipeline = inngest.createFunction(
+  { id: "design-director-from-pipeline", retries: 1 },
+  { event: "agent/monetization-manager.content-ready" },
+  async ({ event, step }) => {
+    const { topic, platforms, personaId, pipelineRunId } = event.data as {
+      topic: string;
+      platforms: string[];
+      personaId?: string;
+      pipelineRunId?: string;
+    };
+
+    if (!platforms.length) {
+      return { skipped: true, reason: "No platforms" };
+    }
+
+    // Check if an ImageGate exists — if so, skip (will be handled by image-gate.selected)
+    const { prisma } = await import("@/lib/db");
+    const existingGate = await step.run("check-image-gate", () =>
+      prisma.imageGate.findFirst({
+        where: {
+          topic,
+          status: "pending",
+          createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        },
+      }),
+    );
+
+    if (existingGate) {
+      return { skipped: true, reason: "ImageGate pending — waiting for human image selection" };
+    }
+
+    const designResult = await step.run("produce-design", () =>
+      runAgent(
+        "design-director",
+        (ctx) =>
+          runDesignProduction(ctx, {
+            topic,
+            articleContent: "",
+            platforms,
+            personaId,
+            pipelineRunId,
+          }),
+        {
+          triggerType: "event",
+          triggerRef: "agent/monetization-manager.content-ready",
+          input: { topic, platforms, pipelineRunId },
+        },
+      ),
+    );
+
+    if (designResult.success && designResult.data) {
+      await step.run("emit-complete", () =>
+        inngest.send({
+          name: "agent/design-director.complete",
+          data: {
+            topic,
+            designAssets: designResult.data!.designAssets.map((a) => ({
+              platform: a.platform,
+              imageUrl: a.imageUrl,
+            })),
+            publicationIds: designResult.data!.publicationIds,
+            agentRunId: designResult.runId,
+          },
+        }),
+      );
+    }
+
+    return designResult;
+  },
+);
+
+/** Legacy fallback: generate designs without images (from content-producer.complete). */
 export const designDirectorRun = inngest.createFunction(
   { id: "design-director-run", retries: 1 },
   { event: "agent/content-producer.complete" },

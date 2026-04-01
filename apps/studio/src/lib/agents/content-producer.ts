@@ -49,7 +49,19 @@ export async function runContentProduction(
     }
   }
 
-  // 2. Run E2E pipeline (article only, design handled by Design Director)
+  // 2. Create PipelineRun record to track this production
+  const pipelineRun = await ctx.prisma.pipelineRun.create({
+    data: {
+      topic: assignment.topic,
+      angle: assignment.angle,
+      contentType: assignment.contentType,
+      personaId: assignment.personaId ?? null,
+      status: "running",
+      feedbackStatus: "pending",
+    },
+  });
+
+  // 3. Run E2E pipeline (article only, design handled by Design Director)
   const e2eResult = await runE2EPipeline({
     topic: assignment.topic,
     contentType: assignment.contentType as "blog" | "sns" | "carousel" | "review",
@@ -60,7 +72,12 @@ export async function runContentProduction(
 
   if (e2eResult.stage === "failed" || !e2eResult.article) {
     await ctx.log("error", `Pipeline failed for "${assignment.topic}"`);
+    await ctx.prisma.pipelineRun.update({
+      where: { id: pipelineRun.id },
+      data: { status: "failed", errorMessage: "E2E pipeline failed" },
+    });
     return {
+      pipelineRunId: pipelineRun.id,
       topic: assignment.topic,
       qualityScore: 0,
       autoApproved: false,
@@ -72,7 +89,22 @@ export async function runContentProduction(
   const qualityScore = e2eResult.article.qualityScore?.overall ?? 0;
   await ctx.log("info", `Quality score: ${qualityScore}/100`);
 
-  // 3. Quality gate
+  // 4. Update PipelineRun with results
+  await ctx.prisma.pipelineRun.update({
+    where: { id: pipelineRun.id },
+    data: {
+      status: qualityScore >= QUALITY_AUTO_APPROVE ? "approved" : "reviewed",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      outlineJson: (e2eResult.article.outline ?? undefined) as any,
+      draftContent: e2eResult.article.draftContent,
+      editedContent: e2eResult.article.editedContent,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      qualityScore: (e2eResult.article.qualityScore ?? undefined) as any,
+      rewriteCount: e2eResult.article.rewriteCount,
+    },
+  });
+
+  // 5. Quality gate
   let autoApproved = false;
   let finalContent = e2eResult.article.editedContent || e2eResult.article.draftContent || "";
 
@@ -85,7 +117,37 @@ export async function runContentProduction(
     await ctx.log("warn", `Low quality (score < 50) — will create for review`);
   }
 
-  // 4. Generate platform-specific text variants
+  // 6. Create BlogPost record linked to PipelineRun
+  let blogPostId: string | undefined;
+  try {
+    const slug = assignment.topic
+      .toLowerCase()
+      .replace(/[^\w가-힣\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .slice(0, 80) + `-${Date.now().toString(36)}`;
+
+    const blogPost = await ctx.prisma.blogPost.create({
+      data: {
+        title: e2eResult.article.outline?.title ?? assignment.topic,
+        slug,
+        content: finalContent,
+        excerpt: finalContent.slice(0, 200),
+        seoTitle: e2eResult.article.outline?.seoTitle ?? "",
+        seoDescription: e2eResult.article.outline?.seoDescription ?? "",
+        seoKeywords: e2eResult.article.outline?.seoKeywords ?? [],
+        wordCount: finalContent.split(/\s+/).length,
+        status: autoApproved ? "approved" : "draft",
+        personaId: assignment.personaId,
+        pipelineRunId: pipelineRun.id,
+      },
+    });
+    blogPostId = blogPost.id;
+    await ctx.log("info", `BlogPost created: ${blogPost.id} (slug: ${slug})`);
+  } catch (err) {
+    await ctx.log("warn", `BlogPost creation failed: ${err}`);
+  }
+
+  // 7. Generate platform-specific text variants
   const platformVariants: PlatformVariant[] = [];
   if (finalContent && assignment.platforms?.length) {
     try {
@@ -135,57 +197,64 @@ ${assignment.platforms.join(", ")}
     }
   }
 
-  // 5. Create proposals/publications
+  // 8. Create proposals/publications (isolated per platform)
   const publicationIds: string[] = [];
-  const pipelineRunId: string | undefined = undefined;
 
-  // Find an active SNS account for each platform
   for (const variant of platformVariants) {
-    const account = await ctx.prisma.snsAccount.findFirst({
-      where: { platform: variant.platform },
-      select: { id: true },
-    });
-    if (!account) continue;
+    try {
+      const account = await ctx.prisma.snsAccount.findFirst({
+        where: { platform: variant.platform },
+        select: { id: true },
+      });
+      if (!account) {
+        await ctx.log("warn", `No SNS account for ${variant.platform} — skipping`);
+        continue;
+      }
 
-    // Create proposal
-    await ctx.prisma.autopilotProposal.create({
-      data: {
-        autopilotConfigId: (await ctx.prisma.autopilotConfig.findFirst({
-          where: { snsAccountId: account.id, isActive: true },
-          select: { id: true },
-        }))?.id ?? "default",
-        topic: assignment.topic,
-        reasoning: `[Agent] ${assignment.angle}`,
-        content: {
-          text: variant.text,
-          hashtags: variant.hashtags,
-        },
-        platform: variant.platform,
-        personaId: assignment.personaId ?? null,
-        status: autoApproved ? "approved" : "pending",
-      },
-    });
-
-    // Create publication if auto-approved
-    if (autoApproved) {
-      const smartTime = await getSmartScheduleTime(account.id).catch(() => null);
-      const pub = await ctx.prisma.publication.create({
+      // Create proposal
+      const config = await ctx.prisma.autopilotConfig.findFirst({
+        where: { snsAccountId: account.id, isActive: true },
+        select: { id: true },
+      });
+      await ctx.prisma.autopilotProposal.create({
         data: {
-          snsAccountId: account.id,
+          autopilotConfigId: config?.id ?? "default",
+          topic: assignment.topic,
+          reasoning: `[Agent] ${assignment.angle}`,
+          content: {
+            text: variant.text,
+            hashtags: variant.hashtags,
+          },
           platform: variant.platform,
-          content: { text: variant.text, hashtags: variant.hashtags },
           personaId: assignment.personaId ?? null,
-          status: "scheduled",
-          scheduledAt: smartTime?.scheduledAt ?? new Date(Date.now() + 30 * 60 * 1000),
+          status: autoApproved ? "approved" : "pending",
         },
       });
-      publicationIds.push(pub.id);
+
+      // Create publication if auto-approved
+      if (autoApproved) {
+        const smartTime = await getSmartScheduleTime(account.id).catch(() => null);
+        const pub = await ctx.prisma.publication.create({
+          data: {
+            snsAccountId: account.id,
+            platform: variant.platform,
+            content: { text: variant.text, hashtags: variant.hashtags },
+            personaId: assignment.personaId ?? null,
+            status: "scheduled",
+            scheduledAt: smartTime?.scheduledAt ?? new Date(Date.now() + 30 * 60 * 1000),
+          },
+        });
+        publicationIds.push(pub.id);
+      }
+    } catch (err) {
+      // Isolate per-platform failure: log and continue with other platforms
+      await ctx.log("warn", `Publication creation failed for ${variant.platform}: ${err}`);
     }
   }
 
   await ctx.log("info", `Created ${publicationIds.length} publications (auto-approved: ${autoApproved})`);
 
-  // 6. Update daily briefing status
+  // 9. Update daily briefing status
   const todayDate = new Date();
   todayDate.setHours(0, 0, 0, 0);
   const briefing = await ctx.prisma.dailyBriefing.findUnique({
@@ -205,11 +274,12 @@ ${assignment.platforms.join(", ")}
   }
 
   return {
-    pipelineRunId,
+    pipelineRunId: pipelineRun.id,
     topic: assignment.topic,
     qualityScore,
     autoApproved,
     platformVariants,
     publicationIds,
+    blogPostId,
   };
 }
