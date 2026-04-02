@@ -74,6 +74,22 @@ const CARD_NEWS_SEQUENCES: Record<string, string[]> = {
   ],
 };
 
+/** Photo-first sequences — full-bleed image cover for magazine-style output */
+const PHOTO_FIRST_SEQUENCES: Record<string, string[]> = {
+  album_review: [
+    "cover.photo.v1", "body.fact.v1", "body.quote.v1", "body.highlight.v1", "end.cta.v1",
+  ],
+  artist_spotlight: [
+    "cover.photo.v1", "body.fact.v2", "body.stat.v1", "body.quote.v1", "end.cta.v1",
+  ],
+  trending: [
+    "cover.photo.v1", "body.list.v1", "body.fact.v1", "body.stat.v1", "end.outro.v1",
+  ],
+  general: [
+    "cover.photo.v1", "body.fact.v1", "body.fact.v2", "body.highlight.v1", "end.outro.v1",
+  ],
+};
+
 /** SNS format → template mapping */
 const SNS_TEMPLATE_MAP: Record<DesignPlatform, string> = {
   instagram: "sns.square.v1",
@@ -120,7 +136,11 @@ export async function designWithTemplate(
   }
 
   // Card news: use template sequence
-  const sequence = CARD_NEWS_SEQUENCES[input.brief.contentType] ?? CARD_NEWS_SEQUENCES.general!;
+  // Prefer photo-first sequence when sourced images are available
+  const hasImages = (input.sourcedImageUrls?.length ?? 0) > 0;
+  const photoSeq = PHOTO_FIRST_SEQUENCES[input.brief.contentType];
+  const defaultSeq = CARD_NEWS_SEQUENCES[input.brief.contentType] ?? CARD_NEWS_SEQUENCES.general!;
+  const sequence = (hasImages && photoSeq) ? photoSeq : defaultSeq;
   const slideCount = input.brief.outputs.find((o) => o.format === format)?.slideCount
     ?? input.contentSlides.length;
 

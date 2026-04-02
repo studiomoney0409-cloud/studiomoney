@@ -20,6 +20,13 @@
     "kind": "cover",
     "description": "Minimal cover without hero image"
   },
+  "cover.photo.v1": {
+    "width": 1080,
+    "height": 1350,
+    "placeholders": ["title", "footer", "hero-image", "logo"],
+    "kind": "cover",
+    "description": "Photo-first cover — full-bleed image with minimal bottom text overlay"
+  },
   "body.fact.v1": {
     "width": 1080,
     "height": 1350,

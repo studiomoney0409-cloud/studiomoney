@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1080" height="1350" viewBox="0 0 1080 1350">
+  <!-- Full-bleed hero image (entire canvas) -->
+  <image id="{{hero-image}}" href="" x="0" y="0" width="1080" height="1350" preserveAspectRatio="xMidYMid slice"/>
+
+  <!-- Bottom scrim gradient (lower 40%) -->
+  <defs>
+    <linearGradient id="bottom-scrim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="0.3" stop-color="#000000" stop-opacity="0.15"/>
+      <stop offset="0.7" stop-color="#000000" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.75"/>
+    </linearGradient>
+    <filter id="text-glow">
+      <feDropShadow dx="0" dy="1" stdDeviation="6" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <rect x="0" y="810" width="1080" height="540" fill="url(#bottom-scrim)"/>
+
+  <!-- Logo placeholder (top-left, small) -->
+  <text id="{{logo}}" x="60" y="68" font-family="Pretendard, sans-serif" font-size="18" font-weight="700" fill="rgba(255,255,255,0.85)" letter-spacing="2" filter="url(#text-glow)" data-max-width="200" data-max-lines="1">
+    WEB MAGAZINE
+  </text>
+
+  <!-- Title text (bottom area, bold, minimal) -->
+  <text id="{{title}}" x="60" y="1200" font-family="Pretendard, sans-serif" font-size="48" font-weight="800" fill="#FFFFFF" filter="url(#text-glow)" data-max-width="960" data-max-lines="2" data-line-height="1.25">
+    제목을 입력하세요
+  </text>
+
+  <!-- Footer text (bottom-left, small source/date) -->
+  <text id="{{footer}}" x="60" y="1300" font-family="Pretendard, sans-serif" font-size="20" font-weight="400" fill="rgba(255,255,255,0.6)" filter="url(#text-glow)" data-max-width="960" data-max-lines="1">
+    출처 · 2026.04
+  </text>
+</svg>

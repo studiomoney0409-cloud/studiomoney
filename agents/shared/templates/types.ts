@@ -10,6 +10,7 @@ export type TemplateId =
   | "cover.hero.v1"
   | "cover.hero.v2"
   | "cover.minimal.v1"
+  | "cover.photo.v1"
   | "body.fact.v1"
   | "body.fact.v2"
   | "body.fact.v3"
