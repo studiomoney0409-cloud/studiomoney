@@ -6,33 +6,15 @@
  *   - SNS image generation
  *   - Style overrides from DesignBrief
  *
- * Requires OPENAI_API_KEY in environment.
- * Run from apps/studio:
- *   set -a && . .env && npx tsx --tsconfig tsconfig.json src/lib/design/__tests__/visual-designer.test.ts
+ * Requires a real OPENAI_API_KEY. Skipped automatically when only the CI dummy key is available.
  */
-
+import { describe, it, expect } from "vitest";
 import { generateDesignBrief } from "../design-director";
-import { generateVisualDesign, designWithTemplate } from "../visual-designer";
-import type { DesignBrief, DesignEngineInput } from "../types";
+import { generateVisualDesign } from "../visual-designer";
+import type { DesignEngineInput } from "../types";
 
-let passed = 0;
-let failed = 0;
-
-async function assert(name: string, fn: () => Promise<void>) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (e) {
-    failed++;
-    console.error(`  FAIL  ${name}`);
-    console.error(`        ${(e as Error).message}`);
-  }
-}
-
-function check(condition: boolean, msg: string) {
-  if (!condition) throw new Error(msg);
-}
+const HAS_REAL_LLM_KEY =
+  !!process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY.startsWith("sk-test-dummy");
 
 const SAMPLE_SLIDES = [
   { title: "ALBUM REVIEW", body: "NewJeans 새 앨범 완벽 해부", footer: "Web Magazine" },
@@ -42,102 +24,69 @@ const SAMPLE_SLIDES = [
   { title: "더 알아보기", body: "매거진에서 전체 리뷰를 확인하세요", footer: "Web Magazine" },
 ];
 
-// ── Test 1: Path A - Card news with template ────────────
+describe.skipIf(!HAS_REAL_LLM_KEY)("Visual Designer Agent (LLM)", () => {
+  it("Path A: Card news (template-based, 5 slides)", async () => {
+    const input: DesignEngineInput = {
+      topic: "NewJeans 3rd Mini Album Review",
+      content: "뉴진스의 세 번째 미니앨범 리뷰입니다.",
+    };
+    const brief = await generateDesignBrief(input);
 
-async function testPathACardNews() {
-  const input: DesignEngineInput = {
-    topic: "NewJeans 3rd Mini Album Review",
-    content: "뉴진스의 세 번째 미니앨범 리뷰입니다.",
-  };
-  const brief = await generateDesignBrief(input);
+    const result = await generateVisualDesign(
+      { brief, contentSlides: SAMPLE_SLIDES },
+      "card_news",
+      "instagram",
+    );
 
-  const result = await generateVisualDesign(
-    { brief, contentSlides: SAMPLE_SLIDES },
-    "card_news",
-    "instagram",
-  );
+    expect(result.designPath).toBe("template");
+    expect(result.slides.length).toBe(5);
+    expect(result.slides[0]!.width).toBe(1080);
+    expect(result.slides[0]!.height).toBe(1080);
+    expect(result.slides[0]!.jsxCode).toContain("<div");
+    expect(result.slides[0]!.jsxCode).toContain("style=");
+  }, 90_000);
 
-  check(result.designPath === "template", `designPath should be template, got ${result.designPath}`);
-  check(result.slides.length === 5, `should have 5 slides, got ${result.slides.length}`);
-  check(result.slides[0]!.width === 1080, "width should be 1080");
-  check(result.slides[0]!.height === 1080, "height should be 1080");
+  it("Path A: SNS image (Twitter 1200x675)", async () => {
+    const input: DesignEngineInput = {
+      topic: "K-POP 트렌드",
+      content: "2026 상반기 트렌드 분석",
+    };
+    const brief = await generateDesignBrief(input);
 
-  // Verify jsxCode contains rendered HTML (not JSON)
-  check(result.slides[0]!.jsxCode.includes("<div"), "jsxCode should contain HTML");
-  check(result.slides[0]!.jsxCode.includes("style="), "jsxCode should contain inline styles");
+    const result = await generateVisualDesign(
+      { brief, contentSlides: [{ title: "K-POP 2026 트렌드", body: "올해의 5가지 키워드" }] },
+      "sns_image",
+      "twitter",
+    );
 
-  console.log(`        slides: ${result.slides.length}`);
-  console.log(`        first slide HTML length: ${result.slides[0]!.jsxCode.length} chars`);
-}
+    expect(result.designPath).toBe("template");
+    expect(result.slides.length).toBe(1);
+    expect(result.slides[0]!.width).toBe(1200);
+    expect(result.slides[0]!.height).toBe(675);
+  }, 90_000);
 
-// ── Test 2: Path A - SNS image ──────────────────────────
+  it("Path B: LLM-generated HTML (Instagram 1080x1080)", async () => {
+    const input: DesignEngineInput = {
+      topic: "BTS 컴백 분석",
+      content: "BTS의 완전체 컴백에 대한 심층 분석입니다.",
+    };
+    const brief = await generateDesignBrief(input);
 
-async function testPathASns() {
-  const input: DesignEngineInput = {
-    topic: "K-POP 트렌드",
-    content: "2026 상반기 트렌드 분석",
-  };
-  const brief = await generateDesignBrief(input);
+    const result = await generateVisualDesign(
+      {
+        brief,
+        contentSlides: [
+          { title: "BTS COMEBACK", body: "완전체 컴백의 의미", role: "cover" as const },
+        ],
+        preferGenerated: true,
+      },
+      "sns_image",
+      "instagram",
+    );
 
-  const result = await generateVisualDesign(
-    { brief, contentSlides: [{ title: "K-POP 2026 트렌드", body: "올해의 5가지 키워드" }] },
-    "sns_image",
-    "twitter",
-  );
-
-  check(result.designPath === "template", "SNS should use template path");
-  check(result.slides.length === 1, "SNS should have 1 slide");
-  check(result.slides[0]!.width === 1200, "twitter width should be 1200");
-  check(result.slides[0]!.height === 675, "twitter height should be 675");
-
-  console.log(`        platform: twitter (${result.slides[0]!.width}x${result.slides[0]!.height})`);
-}
-
-// ── Test 3: Path B - LLM-generated ──────────────────────
-
-async function testPathBGenerated() {
-  const input: DesignEngineInput = {
-    topic: "BTS 컴백 분석",
-    content: "BTS의 완전체 컴백에 대한 심층 분석입니다.",
-  };
-  const brief = await generateDesignBrief(input);
-
-  const result = await generateVisualDesign(
-    {
-      brief,
-      contentSlides: [
-        { title: "BTS COMEBACK", body: "완전체 컴백의 의미", role: "cover" as const },
-      ],
-      preferGenerated: true,
-    },
-    "sns_image",
-    "instagram",
-  );
-
-  check(result.designPath === "generated", "should use generated path");
-  check(result.slides.length === 1, "should have 1 slide");
-  check(result.slides[0]!.jsxCode.includes("<div"), "jsxCode should contain HTML");
-  check(result.slides[0]!.jsxCode.includes("display"), "jsxCode should contain display style");
-
-  console.log(`        HTML length: ${result.slides[0]!.jsxCode.length} chars`);
-  console.log(`        First 200 chars: ${result.slides[0]!.jsxCode.slice(0, 200)}...`);
-}
-
-// ── Run all tests ───────────────────────────────────────
-
-async function main() {
-  console.log(`\nVisual Designer Agent Tests\n`);
-
-  await assert("Path A: Card news (template-based, 5 slides)", testPathACardNews);
-  await assert("Path A: SNS image (Twitter 1200x675)", testPathASns);
-  await assert("Path B: LLM-generated HTML (Instagram 1080x1080)", testPathBGenerated);
-
-  console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
-
-  if (failed > 0) process.exit(1);
-}
-
-main().catch((e) => {
-  console.error("Fatal error:", e);
-  process.exit(1);
+    expect(result.designPath).toBe("generated");
+    expect(result.slides.length).toBe(1);
+    expect(result.slides[0]!.jsxCode).toContain("<div");
+    expect(result.slides[0]!.jsxCode).toContain("display");
+  }, 120_000);
 });

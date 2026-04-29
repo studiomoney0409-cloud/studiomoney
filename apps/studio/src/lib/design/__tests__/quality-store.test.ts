@@ -1,6 +1,7 @@
 /**
  * Quality Store — Unit Test (no LLM required).
  */
+import { describe, it, expect, beforeAll } from "vitest";
 import {
   saveQualityRecord,
   getQualityRecord,
@@ -10,24 +11,6 @@ import {
   clearQualityRecords,
 } from "../quality-store";
 import type { DesignQualityRecord } from "../types";
-
-let passed = 0;
-let failed = 0;
-
-function check(cond: boolean, msg: string) {
-  if (!cond) throw new Error(msg);
-}
-
-function assert(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-    console.log(`  PASS  ${name}`);
-  } catch (e) {
-    failed++;
-    console.error(`  FAIL  ${name}: ${(e as Error).message}`);
-  }
-}
 
 function makeRecord(overrides: Partial<DesignQualityRecord> = {}): DesignQualityRecord {
   return {
@@ -51,81 +34,71 @@ function makeRecord(overrides: Partial<DesignQualityRecord> = {}): DesignQuality
   };
 }
 
-console.log(`\nQuality Store Unit Tests\n`);
+describe("Quality Store", () => {
+  beforeAll(() => {
+    clearQualityRecords();
+  });
 
-clearQualityRecords();
+  it("save + getByDesignId", () => {
+    const r = makeRecord({ designId: "design_1709000000000_abc" });
+    saveQualityRecord(r);
+    const got = getQualityRecord("design_1709000000000_abc");
+    expect(got).toBeDefined();
+    expect(got!.averageScore).toBe(7.8);
+  });
 
-// Test 1
-assert("save + getByDesignId", () => {
-  const r = makeRecord({ designId: "design_1709000000000_abc" });
-  saveQualityRecord(r);
-  const got = getQualityRecord("design_1709000000000_abc");
-  check(got !== undefined, "should find record");
-  check(got!.averageScore === 7.8, "score mismatch");
+  it("aggregate stats with 2 records", () => {
+    saveQualityRecord(makeRecord({
+      designId: "design_1709000001000_def",
+      contentType: "trending",
+      format: "sns_image",
+      platform: "twitter",
+      averageScore: 8.8,
+      verdict: "pass",
+      iterationCount: 1,
+      designPath: "generated",
+      generationTimeMs: 3000,
+    }));
+
+    const stats = getQualityStats();
+    expect(stats.totalDesigns).toBe(2);
+    expect(stats.passRate).toBe(0.5);
+    expect(stats.byVerdict.pass).toBe(1);
+    expect(stats.byVerdict.refine).toBe(1);
+    expect(stats.byDesignPath["template"]!.count).toBe(1);
+    expect(stats.byDesignPath["generated"]!.count).toBe(1);
+  });
+
+  it("filter by contentType", () => {
+    const stats = getQualityStats({ contentType: "album_review" });
+    expect(stats.totalDesigns).toBe(1);
+    expect(stats.averageScore).toBe(7.8);
+  });
+
+  it("recent records (newest first)", () => {
+    const recent = getRecentRecords(10);
+    expect(recent.length).toBe(2);
+    expect(recent[0]!.designId).toContain("def");
+  });
+
+  it("quality trends", () => {
+    saveQualityRecord(makeRecord({
+      designId: `design_${Date.now()}_trend`,
+      averageScore: 9.0,
+      verdict: "pass",
+    }));
+    const trends = getQualityTrends(30);
+    expect(trends.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("empty stats", () => {
+    const stats = getQualityStats({ contentType: "data_insight" });
+    expect(stats.totalDesigns).toBe(0);
+    expect(stats.averageScore).toBe(0);
+  });
+
+  it("clear records", () => {
+    clearQualityRecords();
+    expect(getRecentRecords(10).length).toBe(0);
+  });
 });
-
-// Test 2
-assert("aggregate stats with 2 records", () => {
-  saveQualityRecord(makeRecord({
-    designId: "design_1709000001000_def",
-    contentType: "trending",
-    format: "sns_image",
-    platform: "twitter",
-    averageScore: 8.8,
-    verdict: "pass",
-    iterationCount: 1,
-    designPath: "generated",
-    generationTimeMs: 3000,
-  }));
-
-  const stats = getQualityStats();
-  check(stats.totalDesigns === 2, `expected 2 designs, got ${stats.totalDesigns}`);
-  check(stats.passRate === 0.5, `pass rate should be 0.5, got ${stats.passRate}`);
-  check(stats.byVerdict.pass === 1, "1 pass");
-  check(stats.byVerdict.refine === 1, "1 refine");
-  check(stats.byDesignPath["template"]!.count === 1, "1 template");
-  check(stats.byDesignPath["generated"]!.count === 1, "1 generated");
-});
-
-// Test 3
-assert("filter by contentType", () => {
-  const stats = getQualityStats({ contentType: "album_review" });
-  check(stats.totalDesigns === 1, "1 album_review");
-  check(stats.averageScore === 7.8, "album_review avg 7.8");
-});
-
-// Test 4
-assert("recent records (newest first)", () => {
-  const recent = getRecentRecords(10);
-  check(recent.length === 2, `expected 2, got ${recent.length}`);
-  check(recent[0]!.designId.includes("def"), "newest first");
-});
-
-// Test 5
-assert("quality trends", () => {
-  // Add a record with current timestamp for trend detection
-  saveQualityRecord(makeRecord({
-    designId: `design_${Date.now()}_trend`,
-    averageScore: 9.0,
-    verdict: "pass",
-  }));
-  const trends = getQualityTrends(30);
-  check(trends.length >= 1, `at least 1 trend entry, got ${trends.length}`);
-  // Clean up the extra record
-});
-
-// Test 6
-assert("empty stats", () => {
-  const stats = getQualityStats({ contentType: "data_insight" });
-  check(stats.totalDesigns === 0, "0 data_insight");
-  check(stats.averageScore === 0, "avg 0");
-});
-
-// Test 7
-assert("clear records", () => {
-  clearQualityRecords();
-  check(getRecentRecords(10).length === 0, "should be empty");
-});
-
-console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
-if (failed > 0) process.exit(1);

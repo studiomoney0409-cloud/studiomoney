@@ -2,28 +2,10 @@
  * Publish Bridge — Unit Tests (no API/LLM required).
  * Tests pure helper functions.
  */
+import { describe, it, expect, beforeAll } from "vitest";
 import { prepareForPublishing } from "../publish-bridge";
 import type { DesignBrief, VisualDesignResult } from "../types";
 import { clearPerformanceRecords, getPerformanceRecords } from "../style-performance";
-
-let passed = 0;
-let failed = 0;
-
-function check(cond: boolean, msg: string) {
-  if (!cond) throw new Error(msg);
-}
-
-function assert(name: string, fn: () => Promise<void> | void) {
-  const result = fn();
-  if (result && typeof result.then === "function") {
-    result
-      .then(() => { passed++; console.log(`  PASS  ${name}`); })
-      .catch((e: Error) => { failed++; console.error(`  FAIL  ${name}: ${e.message}`); });
-    return result;
-  }
-  passed++;
-  console.log(`  PASS  ${name}`);
-}
 
 function makeBrief(overrides: Partial<DesignBrief> = {}): DesignBrief {
   return {
@@ -50,18 +32,16 @@ function makeVisualResult(): VisualDesignResult {
   };
 }
 
-// Mock render function
-async function mockRender(html: string, w: number, h: number): Promise<string> {
+async function mockRender(_html: string, w: number, h: number): Promise<string> {
   return `data:image/png;base64,MOCK_${w}x${h}`;
 }
 
-console.log(`\nPublish Bridge Tests\n`);
+describe("Publish Bridge", () => {
+  beforeAll(() => {
+    clearPerformanceRecords();
+  });
 
-clearPerformanceRecords();
-
-async function runAll() {
-  // Test 1
-  await assert("prepareForPublishing — basic", async () => {
+  it("prepareForPublishing — basic", async () => {
     const result = await prepareForPublishing({
       brief: makeBrief(),
       visualResult: makeVisualResult(),
@@ -69,17 +49,16 @@ async function runAll() {
       renderSlide: mockRender,
     });
 
-    check(result.platform === "instagram", "platform");
-    check(result.imageDataUris.length === 2, `images: ${result.imageDataUris.length}`);
-    check(result.imageDataUris[0]!.startsWith("data:image/png"), "image data URI format");
-    check(result.text.length > 0, "text not empty");
-    check(result.hashtags.length > 0, "hashtags not empty");
-    check(result.hashtags.some((h) => h.startsWith("#")), "hashtags start with #");
-    check(result.designMeta.contentType === "album_review", "design meta content type");
+    expect(result.platform).toBe("instagram");
+    expect(result.imageDataUris.length).toBe(2);
+    expect(result.imageDataUris[0]!).toMatch(/^data:image\/png/);
+    expect(result.text.length).toBeGreaterThan(0);
+    expect(result.hashtags.length).toBeGreaterThan(0);
+    expect(result.hashtags.some((h) => h.startsWith("#"))).toBe(true);
+    expect(result.designMeta.contentType).toBe("album_review");
   });
 
-  // Test 2
-  await assert("prepareForPublishing — caption override", async () => {
+  it("prepareForPublishing — caption override", async () => {
     const result = await prepareForPublishing({
       brief: makeBrief(),
       visualResult: makeVisualResult(),
@@ -88,11 +67,10 @@ async function runAll() {
       captionOverride: "Custom caption text",
     });
 
-    check(result.text === "Custom caption text", `text: ${result.text}`);
+    expect(result.text).toBe("Custom caption text");
   });
 
-  // Test 3
-  await assert("prepareForPublishing — twitter truncation", async () => {
+  it("prepareForPublishing — twitter truncation", async () => {
     const longMessage = "A".repeat(300);
     const result = await prepareForPublishing({
       brief: makeBrief({ keyMessage: longMessage }),
@@ -101,12 +79,11 @@ async function runAll() {
       renderSlide: mockRender,
     });
 
-    check(result.text.length <= 280, `twitter text length: ${result.text.length}`);
-    check(result.text.endsWith("..."), "should be truncated");
+    expect(result.text.length).toBeLessThanOrEqual(280);
+    expect(result.text.endsWith("...")).toBe(true);
   });
 
-  // Test 4
-  await assert("prepareForPublishing — extra hashtags", async () => {
+  it("prepareForPublishing — extra hashtags", async () => {
     const result = await prepareForPublishing({
       brief: makeBrief(),
       visualResult: makeVisualResult(),
@@ -115,37 +92,29 @@ async function runAll() {
       extraHashtags: ["NewJeans", "#CustomTag"],
     });
 
-    check(result.hashtags.includes("#NewJeans"), "should include extra hashtag");
-    check(result.hashtags.includes("#CustomTag"), "should include extra with # stripped");
+    expect(result.hashtags).toContain("#NewJeans");
+    expect(result.hashtags).toContain("#CustomTag");
   });
 
-  // Test 5
-  await assert("records style for performance tracking", async () => {
+  it("records style for performance tracking", async () => {
     const records = getPerformanceRecords(10);
-    check(records.length >= 4, `should have records, got ${records.length}`);
-    check(records.some((r) => r.contentType === "album_review"), "should track content type");
-    check(records.some((r) => r.typographyMood === "sans_modern"), "should track typography");
+    expect(records.length).toBeGreaterThanOrEqual(4);
+    expect(records.some((r) => r.contentType === "album_review")).toBe(true);
+    expect(records.some((r) => r.typographyMood === "sans_modern")).toBe(true);
   });
 
-  // Test 6 — empty slides guard
-  await assert("rejects empty slides", async () => {
-    let threw = false;
-    try {
-      await prepareForPublishing({
+  it("rejects empty slides", async () => {
+    await expect(
+      prepareForPublishing({
         brief: makeBrief(),
         visualResult: { ...makeVisualResult(), slides: [] },
         platform: "instagram",
         renderSlide: mockRender,
-      });
-    } catch (e) {
-      threw = true;
-      check((e as Error).message.includes("no slides"), "error message");
-    }
-    check(threw, "should throw on empty slides");
+      }),
+    ).rejects.toThrow(/no slides/);
   });
 
-  // Test 7
-  await assert("youtube_thumb — no caption", async () => {
+  it("youtube_thumb — no caption", async () => {
     const result = await prepareForPublishing({
       brief: makeBrief(),
       visualResult: makeVisualResult(),
@@ -153,12 +122,7 @@ async function runAll() {
       renderSlide: mockRender,
     });
 
-    check(result.text === "", `youtube thumb should have no caption, got: "${result.text}"`);
-    check(result.hashtags.length === 0, "youtube thumb should have no hashtags");
+    expect(result.text).toBe("");
+    expect(result.hashtags.length).toBe(0);
   });
-
-  console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
-  if (failed > 0) process.exit(1);
-}
-
-void runAll();
+});
