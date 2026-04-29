@@ -7,35 +7,141 @@ datasource db {
   provider = "postgresql"
 }
 
-model DesignEntry {
-  id           String   @id @default(uuid())
-  category     String   @default("")
-  title        String
-  imageDataUri String   @db.Text
-  html         String   @db.Text
-  fontMood     String   @default("")
-  createdAt    DateTime @default(now())
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTI-TENANCY CORE
+// ═══════════════════════════════════════════════════════════════════════════
 
-  @@index([category])
+model User {
+  id         String      @id           // Clerk userId (e.g. "user_abc123")
+  email      String      @unique
+  name       String      @default("")
+  imageUrl   String      @default("")
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  workspaces Workspace[]
+
+  @@map("users")
+}
+
+model Workspace {
+  id           String   @id @default(cuid())
+  ownerId      String
+  owner        User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name         String                       // "K-pop 매거진"
+  slug         String                       // URL-safe identifier
+  niche        String                       // "music" | "tech" | "fashion" | "lifestyle" | "custom"
+  keywords     String[] @default([])        // user-defined search seeds
+  trendSources Json                         // { google: true, reddit: { subs: [...] }, spotify: false }
+  promptHints  String   @default("") @db.Text   // niche-specific prompt context injection
+  language     String   @default("ko")
+  region       String   @default("KR")
+  isDefault    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Children (cascaded on delete)
+  personas              WritingPersona[]
+  snsAccounts           SnsAccount[]
+  blogPosts             BlogPost[]
+  pipelineRuns          PipelineRun[]
+  topicDrafts           TopicDraft[]
+  brandKits             BrandKit[]
+  autopilotConfigs      AutopilotConfig[]
+  trendSnapshots        TrendSnapshot[]
+  topicPerformance      TopicPerformance[]
+  publications          Publication[]
+  postPerformance       PostPerformance[]
+  referenceAccounts     ReferenceAccount[]
+  incomingMessages      IncomingMessage[]
+  autoReplyRules        AutoReplyRule[]
+  keywordCampaigns      KeywordCampaign[]
+  analyticsSnapshots    AnalyticsSnapshot[]
+  designEntries         DesignEntry[]
+  designProjects        DesignProject[]
+  moodSearches          MoodSearch[]
+  styleMemoryEntries    StyleMemoryEntry[]
+  designQualityEntries  DesignQualityEntry[]
+  stylePerformance      StylePerformanceEntry[]
+  imageGenHistory       ImageGenHistory[]
+  linkImports           LinkImport[]
+  agentRuns             AgentRun[]
+  weeklyPlans           WeeklyPlan[]
+  dailyBriefings        DailyBriefing[]
+  imageGates            ImageGate[]
+  calendarEvents        CalendarEvent[]
+  contentPlans          ContentPlan[]
+  articleChunks         ArticleChunk[]
+  subscribers           Subscriber[]
+  newsletterIssues      NewsletterIssue[]
+  sponsorDeals          SponsorDeal[]
+  affiliateLinks        AffiliateLink[]
+  revenueEvents         RevenueEvent[]
+  partners              Partner[]
+  outreachCampaigns     OutreachCampaign[]
+
+  @@unique([ownerId, slug])
+  @@index([ownerId])
+  @@index([niche])
+  @@map("workspaces")
+}
+
+model NicheTemplate {
+  id              String   @id @default(cuid())
+  niche           String   @unique          // "music" | "tech" | "fashion" | "lifestyle" | "custom"
+  displayName     String                    // "음악 매거진"
+  description     String   @default("") @db.Text
+  defaultKeywords String[] @default([])
+  defaultSources  Json                      // active trend source preset
+  promptHints     String   @db.Text         // persona system prompt template
+  defaultPersona  Json                      // baseline persona blueprint
+  redditSubs      String[] @default([])
+  categories      String[] @default([])     // ReferenceAccount category options for this niche
+  iconEmoji       String   @default("📦")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("niche_templates")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTENT & DESIGN ARTIFACTS (workspace-scoped)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model DesignEntry {
+  id           String    @id @default(uuid())
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  category     String    @default("")
+  title        String
+  imageDataUri String    @db.Text
+  html         String    @db.Text
+  fontMood     String    @default("")
+  createdAt    DateTime  @default(now())
+
+  @@index([workspaceId, category])
   @@map("design_entries")
 }
 
 model CalendarEvent {
-  id        String   @id @default(uuid())
-  date      String
-  title     String
-  type      String
-  category  String   @default("")
-  status    String   @default("planned")
-  note      String   @default("")
-  createdAt DateTime @default(now())
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  date        String
+  title       String
+  type        String
+  category    String    @default("")
+  status      String    @default("planned")
+  note        String    @default("")
+  createdAt   DateTime  @default(now())
 
-  @@index([date])
+  @@index([workspaceId, date])
   @@map("calendar_events")
 }
 
 model ContentPlan {
   id          String     @id @default(uuid())
+  workspaceId String
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   startDate   String
   endDate     String
   frequency   Json
@@ -44,6 +150,7 @@ model ContentPlan {
   createdAt   DateTime   @default(now())
   items       PlanItem[]
 
+  @@index([workspaceId])
   @@map("content_plans")
 }
 
@@ -67,32 +174,41 @@ model PlanItem {
 }
 
 model MoodSearch {
-  id           String   @id @default(uuid())
-  imageDataUri String   @db.Text
-  moodKeywords String[] @default([])
-  colorPalette String[] @default([])
-  atmosphere   String   @default("")
-  resultCount  Int      @default(0)
-  createdAt    DateTime @default(now())
+  id           String    @id @default(uuid())
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  imageDataUri String    @db.Text
+  moodKeywords String[]  @default([])
+  colorPalette String[]  @default([])
+  atmosphere   String    @default("")
+  resultCount  Int       @default(0)
+  createdAt    DateTime  @default(now())
 
+  @@index([workspaceId])
   @@map("mood_searches")
 }
 
 model DesignProject {
-  id               String   @id @default(uuid())
+  id               String    @id @default(uuid())
+  workspaceId      String
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   title            String
-  status           String   @default("draft")
-  category         String   @default("")
+  status           String    @default("draft")
+  category         String    @default("")
   specJson         Json
-  thumbnailDataUri String   @default("") @db.Text
-  planItemId       String?  @unique
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  thumbnailDataUri String    @default("") @db.Text
+  planItemId       String?   @unique
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  @@index([status])
+  @@index([workspaceId, status])
   @@index([planItemId])
   @@map("design_projects")
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GLOBAL SHARED RESOURCES (no workspace scoping)
+// ═══════════════════════════════════════════════════════════════════════════
 
 model BenchmarkReport {
   id               String   @id @default(uuid())
@@ -112,8 +228,6 @@ model BenchmarkReport {
   @@map("benchmark_reports")
 }
 
-// ─── Key-Value Settings ────────────────────────────────────
-
 model Setting {
   key       String   @id
   value     Json
@@ -122,11 +236,15 @@ model Setting {
   @@map("settings")
 }
 
-// ─── Phase 0: Infrastructure ───────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// INFRASTRUCTURE: SNS Accounts, Jobs, Webhooks
+// ═══════════════════════════════════════════════════════════════════════════
 
 model SnsAccount {
   id              String    @id @default(uuid())
-  platform        String    // "threads" | "instagram" | "x" | "youtube" | "tiktok" | "linkedin" | "wordpress" | "facebook" | "pinterest" | "telegram"
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  platform        String    // threads | instagram | x | youtube | tiktok | linkedin | wordpress | facebook | pinterest | telegram
   platformUserId  String
   displayName     String    @default("")
   profileImageUrl String    @default("")
@@ -139,15 +257,15 @@ model SnsAccount {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  @@unique([platform, platformUserId])
-  @@index([platform])
+  @@unique([workspaceId, platform, platformUserId])
+  @@index([workspaceId, platform])
   @@map("sns_accounts")
 }
 
 model Job {
   id          String    @id @default(uuid())
-  type        String    // "publish" | "autopilot_scan" | "comment_monitor" | "keyword_scan" | "analytics_collect"
-  status      String    @default("pending") // "pending" | "running" | "completed" | "failed" | "cancelled"
+  type        String    // publish | autopilot_scan | comment_monitor | keyword_scan | analytics_collect
+  status      String    @default("pending")
   priority    Int       @default(0)
   payload     Json
   result      Json?
@@ -181,7 +299,7 @@ model CronSchedule {
 model WebhookEvent {
   id           String    @id @default(uuid())
   platform     String
-  eventType    String    // "comment" | "dm" | "mention" | "follow"
+  eventType    String    // comment | dm | mention | follow
   payload      Json
   processed    Boolean   @default(false)
   processedAt  DateTime?
@@ -193,80 +311,83 @@ model WebhookEvent {
   @@map("webhook_events")
 }
 
-// ─── Phase 1: Content Creation Enhancement ─────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTENT CREATION: Personas, Link Imports
+// ═══════════════════════════════════════════════════════════════════════════
 
 model LinkImport {
-  id                 String   @id @default(uuid())
+  id                 String    @id @default(uuid())
+  workspaceId        String
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   urls               String[]
-  commonInstructions String   @default("")
-  status             String   @default("pending") // "pending" | "processing" | "completed" | "failed"
-  results            Json?    // per-URL extraction results
-  generatedPostIds   String[] @default([])
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  commonInstructions String    @default("")
+  status             String    @default("pending") // pending | processing | completed | failed
+  results            Json?
+  generatedPostIds   String[]  @default([])
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  @@index([status])
+  @@index([workspaceId, status])
   @@map("link_imports")
 }
 
 model WritingPersona {
-  id               String   @id @default(uuid())
+  id               String    @id @default(uuid())
+  workspaceId      String
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   name             String
-  creationMethod   String   // "copy" | "analyze" | "manual" | "template"
+  creationMethod   String    // copy | analyze | manual | template
   sourceAccountId  String?
 
-  // Identity
-  perspective      String   @default("")  // "1st person plural" | "3rd person" | etc.
-  expertiseAreas   String[] @default([])  // ["K-pop", "indie rock", "vinyl"]
+  perspective      String   @default("")
+  expertiseAreas   String[] @default([])
 
-  // Tone
-  tone             Json?    // { formality, humor, emotion, energy }
-  emotionalDrivers String[] @default([])  // Persado-inspired: ["curiosity", "nostalgia"]
+  tone             Json?
+  emotionalDrivers String[] @default([])
 
-  // Vocabulary & Structure
-  vocabulary       Json?    // { level, preferredWords, avoidWords, jargon }
-  structure        Json?    // { avgSentenceLength, paragraphPattern, hookStyle }
+  vocabulary       Json?
+  structure        Json?
 
-  // Content Rules (Jasper/Writer pattern)
-  contentRules     Json?    // { always: string[], never: string[] }
+  contentRules     Json?
+  channelProfiles  Json?
+  goldenExamples   Json?
 
-  // Channel-specific profiles (Typeface pattern)
-  channelProfiles  Json?    // { sns: {...}, blog: {...}, carousel: {...} }
-
-  // Golden Examples for few-shot (Copy.ai/Typeface pattern)
-  goldenExamples   Json?    // { sns: string[], blog: string[], review: string[] }
-
-  // Existing fields
-  topicPrefs       Json?    // { preferredTopics, avoidTopics, expertiseAreas }
-  sampleTexts      Json?    // { original: string[], rewritten: string[] }
+  topicPrefs       Json?
+  sampleTexts      Json?
   styleFingerprint String   @default("") @db.Text
   isDefault        Boolean  @default(false)
   isActive         Boolean  @default(true)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
   @@map("writing_personas")
 }
 
-// ─── Phase 2: Publishing Pipeline ──────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// PUBLISHING PIPELINE
+// ═══════════════════════════════════════════════════════════════════════════
 
 model Publication {
   id              String    @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   projectId       String?
   snsAccountId    String
   platform        String
-  status          String    @default("draft") // "draft" | "scheduled" | "publishing" | "published" | "failed"
+  status          String    @default("draft") // draft | scheduled | publishing | published | failed
   scheduledAt     DateTime?
   publishedAt     DateTime?
   platformPostId  String?
   platformPostUrl String?
-  content         Json      // { text, mediaUrls, hashtags, etc. }
+  content         Json
   personaId       String?
   error           String?   @db.Text
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  @@index([status])
+  @@index([workspaceId, status])
   @@index([scheduledAt])
   @@index([snsAccountId])
   @@index([personaId])
@@ -274,230 +395,260 @@ model Publication {
 }
 
 model PostPerformance {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   publicationId   String
   snsAccountId    String
   platform        String
   publishedAt     DateTime
-  hourOfDay       Int      // 0-23
-  dayOfWeek       Int      // 0-6
-  views           Int      @default(0)
-  likes           Int      @default(0)
-  comments        Int      @default(0)
-  shares          Int      @default(0)
-  saves           Int      @default(0)
-  engagementRate  Float    @default(0)
-  snapshotAt      DateTime @default(now())
+  hourOfDay       Int
+  dayOfWeek       Int
+  views           Int       @default(0)
+  likes           Int       @default(0)
+  comments        Int       @default(0)
+  shares          Int       @default(0)
+  saves           Int       @default(0)
+  engagementRate  Float     @default(0)
+  snapshotAt      DateTime  @default(now())
 
-  @@index([snsAccountId, platform])
+  @@index([workspaceId, snsAccountId])
   @@index([publishedAt])
   @@map("post_performance")
 }
 
-// ─── Phase 3: Autopilot ─────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTOPILOT
+// ═══════════════════════════════════════════════════════════════════════════
 
 model AutopilotConfig {
-  id             String   @id @default(uuid())
-  snsAccountId   String
-  personaId      String?
-  platforms      String[] // e.g. ["threads","instagram"]
-  postsPerDay    Int      @default(1)
-  approvalMode   String   @default("manual") // manual | auto
-  isActive       Boolean  @default(false)
-  topicKeywords  String[] // seed topics
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String    @id @default(uuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  snsAccountId  String
+  personaId     String?
+  platforms     String[]
+  postsPerDay   Int       @default(1)
+  approvalMode  String    @default("manual")
+  isActive      Boolean   @default(false)
+  topicKeywords String[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  proposals      AutopilotProposal[]
+  proposals AutopilotProposal[]
 
+  @@index([workspaceId])
   @@index([snsAccountId])
   @@map("autopilot_configs")
 }
 
 model AutopilotProposal {
-  id               String   @id @default(uuid())
+  id                String          @id @default(uuid())
   autopilotConfigId String
-  config           AutopilotConfig @relation(fields: [autopilotConfigId], references: [id])
-  topic            String
-  reasoning        String   @db.Text
-  content          Json     // { text, hashtags, mediaUrls? }
-  platform         String
-  status           String   @default("pending") // pending | approved | rejected | published
-  scheduledAt      DateTime?
-  publishedAt      DateTime?
-  publicationId    String?  // links to Publication after publish
-  personaId        String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  config            AutopilotConfig @relation(fields: [autopilotConfigId], references: [id], onDelete: Cascade)
+  topic             String
+  reasoning         String          @db.Text
+  content           Json
+  platform          String
+  status            String          @default("pending")
+  scheduledAt       DateTime?
+  publishedAt       DateTime?
+  publicationId     String?
+  personaId         String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
   @@index([autopilotConfigId])
   @@index([status])
   @@map("autopilot_proposals")
 }
 
-// ─── Phase 3: Comment / DM Management ───────────
+// ═══════════════════════════════════════════════════════════════════════════
+// COMMENT / DM MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════
 
 model IncomingMessage {
-  id            String   @id @default(uuid())
-  snsAccountId  String
-  platform      String
-  externalId    String   // platform-specific message ID
-  parentPostId  String?  // which post this is a comment on
-  senderName    String
-  senderHandle  String
-  messageType   String   @default("comment") // comment | dm | mention
-  body          String   @db.Text
-  classification String? // question | praise | complaint | spam | other
-  sentiment     String?  // positive | neutral | negative
-  priority      String   @default("normal") // low | normal | high | urgent
-  isGoldenTime  Boolean  @default(false) // within engagement window
-  autoReplied   Boolean  @default(false)
-  autoReplyText String?  @db.Text
-  isRead        Boolean  @default(false)
-  receivedAt    DateTime @default(now())
-  processedAt   DateTime?
+  id             String    @id @default(uuid())
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  snsAccountId   String
+  platform       String
+  externalId     String
+  parentPostId   String?
+  senderName     String
+  senderHandle   String
+  messageType    String    @default("comment")
+  body           String    @db.Text
+  classification String?
+  sentiment      String?
+  priority       String    @default("normal")
+  isGoldenTime   Boolean   @default(false)
+  autoReplied    Boolean   @default(false)
+  autoReplyText  String?   @db.Text
+  isRead         Boolean   @default(false)
+  receivedAt     DateTime  @default(now())
+  processedAt    DateTime?
 
   @@unique([platform, externalId])
-  @@index([snsAccountId, isRead])
+  @@index([workspaceId, snsAccountId, isRead])
   @@index([classification])
   @@map("incoming_messages")
 }
 
 model AutoReplyRule {
-  id            String   @id @default(uuid())
-  snsAccountId  String
-  name          String
-  isActive      Boolean  @default(true)
-  triggerType   String   // classification | keyword | sentiment | all
-  triggerValue  String   // e.g. "question", "감사", "negative"
-  replyTemplate String   @db.Text // supports {{senderName}} variables
-  useAi         Boolean  @default(false) // generate contextual reply with AI
-  aiInstructions String? @db.Text
-  createdAt     DateTime @default(now())
+  id             String    @id @default(uuid())
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  snsAccountId   String
+  name           String
+  isActive       Boolean   @default(true)
+  triggerType    String
+  triggerValue   String
+  replyTemplate  String    @db.Text
+  useAi          Boolean   @default(false)
+  aiInstructions String?   @db.Text
+  createdAt      DateTime  @default(now())
 
-  @@index([snsAccountId])
+  @@index([workspaceId, snsAccountId])
   @@map("auto_reply_rules")
 }
 
-// ─── Phase 3: Keyword Campaign ──────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// KEYWORD CAMPAIGN
+// ═══════════════════════════════════════════════════════════════════════════
 
 model KeywordCampaign {
-  id             String   @id @default(uuid())
-  snsAccountId   String
-  name           String
-  keywords       String[] // search terms
-  platforms      String[] // target platforms
-  commentMode    String   @default("ai") // ai | template
-  commentTemplate String? @db.Text
-  aiInstructions  String? @db.Text // prompt for AI-generated comments
-  dailyLimit     Int      @default(10)
-  todayCount     Int      @default(0)
-  operatingStart Int      @default(9)  // hour 0-23
-  operatingEnd   Int      @default(22) // hour 0-23
-  minDelaySec    Int      @default(30)
-  maxDelaySec    Int      @default(300)
-  isActive       Boolean  @default(false)
-  tosWarningAcked Boolean @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id              String    @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  snsAccountId    String
+  name            String
+  keywords        String[]
+  platforms       String[]
+  commentMode     String    @default("ai")
+  commentTemplate String?   @db.Text
+  aiInstructions  String?   @db.Text
+  dailyLimit      Int       @default(10)
+  todayCount      Int       @default(0)
+  operatingStart  Int       @default(9)
+  operatingEnd    Int       @default(22)
+  minDelaySec     Int       @default(30)
+  maxDelaySec     Int       @default(300)
+  isActive        Boolean   @default(false)
+  tosWarningAcked Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  @@index([snsAccountId])
+  logs KeywordCommentLog[]
+
+  @@index([workspaceId, snsAccountId])
   @@map("keyword_campaigns")
 }
 
 model KeywordCommentLog {
-  id              String   @id @default(uuid())
-  campaignId      String
-  platform        String
-  targetPostId    String?  // platform-specific post ID for API calls
-  targetPostUrl   String
-  targetPostText  String?  @db.Text
-  commentText     String   @db.Text
-  status          String   @default("pending") // pending | scheduled | posted | failed | skipped
-  error           String?
-  postedAt        DateTime?
-  createdAt       DateTime @default(now())
+  id             String          @id @default(uuid())
+  campaignId     String
+  campaign       KeywordCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  platform       String
+  targetPostId   String?
+  targetPostUrl  String
+  targetPostText String?         @db.Text
+  commentText    String          @db.Text
+  status         String          @default("pending")
+  error          String?
+  postedAt       DateTime?
+  createdAt      DateTime        @default(now())
 
   @@index([campaignId])
   @@index([status])
   @@map("keyword_comment_logs")
 }
 
-// ─── Phase 4: Analytics + Blog ──────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// ANALYTICS & BLOG
+// ═══════════════════════════════════════════════════════════════════════════
 
 model AnalyticsSnapshot {
-  id             String   @id @default(uuid())
-  snsAccountId   String
-  platform       String
-  date           DateTime @db.Date
-  followers      Int      @default(0)
-  followersGrowth Int     @default(0)
-  reach          Int      @default(0)
-  impressions    Int      @default(0)
-  engagement     Int      @default(0)
-  engagementRate Float    @default(0)
-  profileViews   Int      @default(0)
-  demographics   Json?    // { age, gender, topCities, topCountries }
-  topPosts       Json?    // [{ postId, text, likes, comments, shares }]
-  createdAt      DateTime @default(now())
+  id              String    @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  snsAccountId    String
+  platform        String
+  date            DateTime  @db.Date
+  followers       Int       @default(0)
+  followersGrowth Int       @default(0)
+  reach           Int       @default(0)
+  impressions     Int       @default(0)
+  engagement      Int       @default(0)
+  engagementRate  Float     @default(0)
+  profileViews    Int       @default(0)
+  demographics    Json?
+  topPosts        Json?
+  createdAt       DateTime  @default(now())
 
   @@unique([snsAccountId, date])
-  @@index([snsAccountId, platform])
+  @@index([workspaceId, snsAccountId, platform])
   @@map("analytics_snapshots")
 }
 
 model BlogPost {
-  id           String   @id @default(uuid())
-  title        String
-  slug         String   @unique
-  content      String   @db.Text
-  excerpt      String   @default("") @db.Text
-  seoTitle     String   @default("")
-  seoDescription String @default("") @db.Text
-  seoKeywords  String[] // SEO keywords
-  wordCount    Int      @default(0)
-  status       String   @default("draft") // draft | outlined | drafting | drafted | editing | reviewed | approved | published
-  personaId    String?
-  pipelineRunId String? @unique
-  publishedAt  DateTime?
-  coverImageUrl String?  @db.Text
-  visualAssets  Json?
-  publishedUrl String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id             String    @id @default(uuid())
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title          String
+  slug           String
+  content        String    @db.Text
+  excerpt        String    @default("") @db.Text
+  seoTitle       String    @default("")
+  seoDescription String    @default("") @db.Text
+  seoKeywords    String[]
+  wordCount      Int       @default(0)
+  status         String    @default("draft")
+  personaId      String?
+  pipelineRunId  String?   @unique
+  publishedAt    DateTime?
+  coverImageUrl  String?   @db.Text
+  visualAssets   Json?
+  publishedUrl   String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  pipelineRun  PipelineRun? @relation(fields: [pipelineRunId], references: [id])
+  pipelineRun PipelineRun? @relation(fields: [pipelineRunId], references: [id])
 
+  @@unique([workspaceId, slug])
+  @@index([workspaceId, status])
   @@map("blog_posts")
 }
 
-// ─── Music Knowledge Graph ──────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// MUSIC KNOWLEDGE GRAPH (global shared catalog — no workspace scoping)
+// ═══════════════════════════════════════════════════════════════════════════
 
 model MusicArtist {
-  id              String   @id @default(uuid())
-  name            String
-  nameKo          String   @default("")
-  aliases         String[] @default([])
-  type            String   @default("person") // "person" | "group" | "orchestra"
-  spotifyId       String?  @unique
-  musicBrainzId   String?  @unique
-  genres          String[] @default([])
-  bio             String   @default("") @db.Text
-  bioKo           String   @default("") @db.Text
-  imageUrl        String   @default("")
-  popularity      Int      @default(0)
-  followers       Int      @default(0)
-  activeFrom      String?
-  activeTo        String?
-  country         String   @default("")
-  metadata        Json?
-  lastSyncedAt    DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id            String    @id @default(uuid())
+  name          String
+  nameKo        String    @default("")
+  aliases       String[]  @default([])
+  type          String    @default("person")
+  spotifyId     String?   @unique
+  musicBrainzId String?   @unique
+  genres        String[]  @default([])
+  bio           String    @default("") @db.Text
+  bioKo         String    @default("") @db.Text
+  imageUrl      String    @default("")
+  popularity    Int       @default(0)
+  followers     Int       @default(0)
+  activeFrom    String?
+  activeTo      String?
+  country       String    @default("")
+  metadata      Json?
+  lastSyncedAt  DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  albums          MusicAlbum[]
-  relationsFrom   ArtistRelation[] @relation("from")
-  relationsTo     ArtistRelation[] @relation("to")
+  albums        MusicAlbum[]
+  relationsFrom ArtistRelation[] @relation("from")
+  relationsTo   ArtistRelation[] @relation("to")
 
   @@index([spotifyId])
   @@index([name])
@@ -505,29 +656,29 @@ model MusicArtist {
 }
 
 model MusicAlbum {
-  id              String   @id @default(uuid())
+  id              String      @id @default(uuid())
   title           String
-  titleKo         String   @default("")
+  titleKo         String      @default("")
   artistId        String
   artist          MusicArtist @relation(fields: [artistId], references: [id])
-  spotifyId       String?  @unique
-  musicBrainzId   String?  @unique
+  spotifyId       String?     @unique
+  musicBrainzId   String?     @unique
   releaseDate     String?
-  albumType       String   @default("album") // "album" | "single" | "ep" | "compilation"
-  totalTracks     Int      @default(0)
-  label           String   @default("")
-  genres          String[] @default([])
-  imageUrl        String   @default("")
-  popularity      Int      @default(0)
+  albumType       String      @default("album")
+  totalTracks     Int         @default(0)
+  label           String      @default("")
+  genres          String[]    @default([])
+  imageUrl        String      @default("")
+  popularity      Int         @default(0)
   avgDanceability Float?
   avgEnergy       Float?
   avgValence      Float?
   avgTempo        Float?
   metadata        Json?
   lastSyncedAt    DateTime?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime    @default(now())
 
-  tracks          MusicTrack[]
+  tracks MusicTrack[]
 
   @@index([artistId])
   @@index([releaseDate])
@@ -535,37 +686,37 @@ model MusicAlbum {
 }
 
 model MusicTrack {
-  id              String   @id @default(uuid())
-  title           String
-  albumId         String
-  album           MusicAlbum @relation(fields: [albumId], references: [id])
-  spotifyId       String?  @unique
-  trackNumber     Int      @default(0)
-  durationMs      Int      @default(0)
-  popularity      Int      @default(0)
-  previewUrl      String?
-  danceability    Float?
-  energy          Float?
-  valence         Float?
-  tempo           Float?
-  acousticness    Float?
+  id               String     @id @default(uuid())
+  title            String
+  albumId          String
+  album            MusicAlbum @relation(fields: [albumId], references: [id])
+  spotifyId        String?    @unique
+  trackNumber      Int        @default(0)
+  durationMs       Int        @default(0)
+  popularity       Int        @default(0)
+  previewUrl       String?
+  danceability     Float?
+  energy           Float?
+  valence          Float?
+  tempo            Float?
+  acousticness     Float?
   instrumentalness Float?
-  createdAt       DateTime @default(now())
+  createdAt        DateTime   @default(now())
 
   @@index([albumId])
   @@map("music_tracks")
 }
 
 model ArtistRelation {
-  id              String   @id @default(uuid())
-  fromArtistId    String
-  toArtistId      String
-  fromArtist      MusicArtist @relation("from", fields: [fromArtistId], references: [id])
-  toArtist        MusicArtist @relation("to", fields: [toArtistId], references: [id])
-  relationType    String   // "similar_to" | "collaborated_with" | "influenced_by" | "member_of"
-  strength        Float    @default(0.5)
-  source          String   @default("spotify")
-  createdAt       DateTime @default(now())
+  id           String      @id @default(uuid())
+  fromArtistId String
+  toArtistId   String
+  fromArtist   MusicArtist @relation("from", fields: [fromArtistId], references: [id])
+  toArtist     MusicArtist @relation("to", fields: [toArtistId], references: [id])
+  relationType String      // similar_to | collaborated_with | influenced_by | member_of
+  strength     Float       @default(0.5)
+  source       String      @default("spotify")
+  createdAt    DateTime    @default(now())
 
   @@unique([fromArtistId, toArtistId, relationType])
   @@index([fromArtistId])
@@ -574,143 +725,160 @@ model ArtistRelation {
 }
 
 model MusicGenre {
-  id              String   @id @default(uuid())
-  name            String   @unique
-  nameKo          String   @default("")
-  parentGenre     String?
-  description     String   @default("")
-  createdAt       DateTime @default(now())
+  id          String   @id @default(uuid())
+  name        String   @unique
+  nameKo      String   @default("")
+  parentGenre String?
+  description String   @default("")
+  createdAt   DateTime @default(now())
 
   @@map("music_genres")
 }
 
-// ─── RAG Vector Storage ─────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// RAG VECTOR STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
 
 model ArticleChunk {
-  id              String   @id @default(uuid())
-  content         String   @db.Text
-  embedding       Unsupported("vector(1536)")
-  sourceType      String   // "blog" | "sns" | "carousel" | "review"
-  sourceId        String
-  personaId       String?
-  topics          String[] @default([])
-  artistMentions  String[] @default([])
-  publishedAt     DateTime?
-  chunkIndex      Int      @default(0)
-  createdAt       DateTime @default(now())
+  id             String    @id @default(uuid())
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  content        String    @db.Text
+  embedding      Unsupported("vector(1536)")
+  sourceType     String    // blog | sns | carousel | review
+  sourceId       String
+  personaId      String?
+  topics         String[]  @default([])
+  entityMentions String[]  @default([])  // generic name (was artistMentions)
+  publishedAt    DateTime?
+  chunkIndex     Int       @default(0)
+  createdAt      DateTime  @default(now())
 
-  @@index([sourceType])
+  @@index([workspaceId, sourceType])
   @@index([personaId])
   @@map("article_chunks")
 }
 
-// ─── Topic Intelligence ─────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// TOPIC INTELLIGENCE
+// ═══════════════════════════════════════════════════════════════════════════
 
 model TrendSnapshot {
-  id          String   @id @default(uuid())
-  source      String   // "google" | "youtube" | "naver-datalab" | "naver-news" | "naver-blog" | "hackernews"
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  source      String    // google | youtube | naver-datalab | naver-news | naver-blog | reddit | spotify | hackernews
   title       String
-  url         String   @default("")
-  description String   @default("")
-  rank        Int      @default(0)
-  fetchedAt   DateTime @default(now())
+  url         String    @default("")
+  description String    @default("")
+  rank        Int       @default(0)
+  fetchedAt   DateTime  @default(now())
 
-  @@index([source, fetchedAt])
+  @@index([workspaceId, source, fetchedAt])
   @@index([title])
   @@map("trend_snapshots")
 }
 
 model TopicPerformance {
   id              String    @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   topic           String
-  category        String    @default("") // "album_review" | "artist_profile" | "trend_analysis" | ...
+  category        String    @default("")
   articleCount    Int       @default(0)
   avgEngagement   Float     @default(0)
   lastPublishedAt DateTime?
-  coolingUntil    DateTime? // don't repeat until this date
+  coolingUntil    DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  @@unique([topic, category])
+  @@unique([workspaceId, topic, category])
   @@map("topic_performance")
 }
 
-// ─── Design Engine: Style Memory ────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// DESIGN ENGINE: Style Memory, Quality, Performance
+// ═══════════════════════════════════════════════════════════════════════════
 
 model StyleMemoryEntry {
-  id               String   @id @default(uuid())
-  key              String   @unique // "artist:{spotifyId}" or "album:{spotifyId}"
-  tokenJson        Json     // StyleToken serialized
-  source           String   // "spotify_album_art" | "user_upload" | "url_extraction"
-  artistName       String   @default("")
-  albumName        String   @default("")
-  spotifyArtistId  String   @default("")
-  spotifyAlbumId   String   @default("")
-  confidence       Float    @default(0.5)
-  accessCount      Int      @default(0)
-  lastAccessedAt   DateTime @default(now())
-  extractedAt      DateTime @default(now())
-  createdAt        DateTime @default(now())
+  id              String    @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  key             String                      // e.g. "artist:{spotifyId}" or "album:{spotifyId}" — music-only
+  tokenJson       Json
+  source          String                      // spotify_album_art | user_upload | url_extraction
+  artistName      String    @default("")
+  albumName       String    @default("")
+  spotifyArtistId String    @default("")
+  spotifyAlbumId  String    @default("")
+  confidence      Float     @default(0.5)
+  accessCount     Int       @default(0)
+  lastAccessedAt  DateTime  @default(now())
+  extractedAt     DateTime  @default(now())
+  createdAt       DateTime  @default(now())
 
-  @@index([spotifyArtistId])
+  @@unique([workspaceId, key])
+  @@index([workspaceId, spotifyArtistId])
   @@index([lastAccessedAt])
   @@map("style_memory_entries")
 }
 
-// ─── Design Engine: Quality Records ─────────────────
-
 model DesignQualityEntry {
-  id               String   @id @default(uuid())
-  designId         String   @unique
-  contentType      String   // DesignContentType
-  format           String   // DesignFormat
-  platform         String   // DesignPlatform
-  scoresJson       Json     // CriticDimensionScore[]
+  id               String    @id @default(uuid())
+  workspaceId      String
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  designId         String    @unique
+  contentType      String
+  format           String
+  platform         String
+  scoresJson       Json
   averageScore     Float
-  verdict          String   // "pass" | "refine" | "regenerate"
-  iterationCount   Int      @default(1)
-  designPath       String   // "template" | "generated" | "motion" | "data_viz"
-  generationTimeMs Int      @default(0)
+  verdict          String
+  iterationCount   Int       @default(1)
+  designPath       String
+  generationTimeMs Int       @default(0)
   costUsd          Float?
-  createdAt        DateTime @default(now())
+  createdAt        DateTime  @default(now())
 
-  @@index([contentType])
+  @@index([workspaceId, contentType])
   @@index([verdict])
   @@index([createdAt])
   @@map("design_quality_entries")
 }
 
-// ─── Design Engine: Style Performance ───────────────
-
 model StylePerformanceEntry {
-  id              String   @id
-  contentType     String
-  format          String
-  platform        String
-  templateId      String?
-  designPath      String   // "template" | "generated" | "motion" | "data_viz"
-  typographyMood  String?
-  layoutStyle     String?
-  colorMood       String?
-  primaryColor    String?
-  accentColor     String?
-  hasImage        Boolean  @default(false)
-  slideCount      Int      @default(1)
-  impressions     Int?
-  engagements     Int?
-  saves           Int?
-  shares          Int?
-  clicks          Int?
-  engagementRate  Float?
-  createdAt       DateTime @default(now())
+  id             String    @id
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contentType    String
+  format         String
+  platform       String
+  templateId     String?
+  designPath     String
+  typographyMood String?
+  layoutStyle    String?
+  colorMood      String?
+  primaryColor   String?
+  accentColor    String?
+  hasImage       Boolean   @default(false)
+  slideCount     Int       @default(1)
+  impressions    Int?
+  engagements    Int?
+  saves          Int?
+  shares         Int?
+  clicks         Int?
+  engagementRate Float?
+  createdAt      DateTime  @default(now())
 
-  @@index([contentType, platform])
+  @@index([workspaceId, contentType, platform])
   @@index([engagementRate])
   @@index([createdAt])
   @@map("style_performance_entries")
 }
 
-// ─── LLM Usage Tracking ─────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// LLM USAGE TRACKING (global)
+// ═══════════════════════════════════════════════════════════════════════════
 
 model LlmUsageLog {
   id               String   @id @default(cuid())
@@ -719,96 +887,98 @@ model LlmUsageLog {
   completionTokens Int
   totalTokens      Int
   costUsd          Float
-  caller           String   // autopilot, pipeline, suggestions, topic-intelligence, design
+  caller           String
   durationMs       Int?
+  workspaceId      String?  // optional: caller may be a system job
   createdAt        DateTime @default(now())
 
   @@index([createdAt])
   @@index([caller])
   @@index([model])
+  @@index([workspaceId])
   @@map("llm_usage_logs")
 }
 
-// ─── AI Editorial Pipeline ──────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// AI EDITORIAL PIPELINE
+// ═══════════════════════════════════════════════════════════════════════════
 
 model PipelineRun {
-  id              String   @id @default(uuid())
-  topic           String
-  angle           String   @default("")
-  contentType     String   @default("blog") // blog | sns | carousel | review
-  personaId       String?
-  status          String   @default("running") // running | outlined | drafting | drafted | editing | reviewed | approved | failed
+  id            String    @id @default(uuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  topic         String
+  angle         String    @default("")
+  contentType   String    @default("blog")
+  personaId     String?
+  status        String    @default("running")
 
-  // Pipeline stage outputs
-  outlineJson     Json?
-  researchJson    Json?
-  draftContent    String?  @db.Text
-  editedContent   String?  @db.Text
+  outlineJson   Json?
+  researchJson  Json?
+  draftContent  String?   @db.Text
+  editedContent String?   @db.Text
 
-  // Quality scores (from Editor Agent)
-  qualityScore    Json?    // { factualAccuracy, voiceAlignment, readability, originality, seo, overall, feedback }
-  rewriteCount    Int      @default(0)
+  qualityScore  Json?
+  rewriteCount  Int       @default(0)
 
-  // Publishing
-  publicationId   String?  // FK to Publication or BlogPost external ID
-  publishedAt     DateTime?
+  publicationId String?
+  publishedAt   DateTime?
 
-  // Feedback — collected at T+1h, T+24h, T+7d, T+30d
-  metrics1h       Json?    // { views, likes, comments, shares }
-  metrics24h      Json?
-  metrics7d       Json?
-  metrics30d      Json?
-  engagementRate      Float?   // final calculated rate
-  contentQualityRatio Float?   // (engagement * read_time) / views
-  feedbackStatus  String   @default("pending") // pending | collecting | complete
+  metrics1h           Json?
+  metrics24h          Json?
+  metrics7d           Json?
+  metrics30d          Json?
+  engagementRate      Float?
+  contentQualityRatio Float?
+  feedbackStatus      String    @default("pending")
   feedbackProcessedAt DateTime?
 
-  // Error tracking
-  errorMessage    String?  @db.Text
+  errorMessage String?  @db.Text
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  blogPost        BlogPost?
-  topicDraft      TopicDraft?
+  blogPost   BlogPost?
+  topicDraft TopicDraft?
 
+  @@index([workspaceId, status])
   @@index([personaId])
   @@index([contentType])
-  @@index([status])
   @@index([feedbackStatus])
   @@map("pipeline_runs")
 }
 
-// ─── Topic Workshop ──────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// TOPIC WORKSHOP
+// ═══════════════════════════════════════════════════════════════════════════
 
 model TopicDraft {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   topic           String
-  angle           String   @default("")
-  reasoning       String   @default("") @db.Text
-  contentType     String   @default("blog") // blog | sns | carousel | review
-  status          String   @default("saved") // saved | refining | refined | sent
+  angle           String    @default("")
+  reasoning       String    @default("") @db.Text
+  contentType     String    @default("blog")
+  status          String    @default("saved")
 
-  // Origin tracking
-  sourceType      String   @default("manual") // suggestion | topic-intelligence | autopilot | manual
-  sourceData      Json?    // original SuggestionItem or TopicBrief snapshot
+  sourceType      String    @default("manual") // suggestion | topic-intelligence | autopilot | manual | search
+  sourceData      Json?
 
-  // Enriched fields (updated by AI chat)
-  trendSources    String[] @default([])
-  relatedEntities String[] @default([])
-  formats         Json?    // { sns, blog, carousel } format previews
+  trendSources    String[]  @default([])
+  relatedEntities String[]  @default([])
+  formats         Json?
 
-  // Connections
   personaId       String?
-  pipelineRunId   String?  @unique
+  pipelineRunId   String?   @unique
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  messages        TopicMessage[]
-  pipelineRun     PipelineRun? @relation(fields: [pipelineRunId], references: [id])
+  messages    TopicMessage[]
+  pipelineRun PipelineRun? @relation(fields: [pipelineRunId], references: [id])
 
-  @@index([status])
+  @@index([workspaceId, status])
   @@index([createdAt])
   @@map("topic_drafts")
 }
@@ -817,12 +987,9 @@ model TopicMessage {
   id           String     @id @default(uuid())
   topicDraftId String
   draft        TopicDraft @relation(fields: [topicDraftId], references: [id], onDelete: Cascade)
-  role         String     // "user" | "assistant"
+  role         String
   content      String     @db.Text
-
-  // If assistant message, store the updated topic fields it produced
-  topicUpdate  Json?      // { topic?, angle?, reasoning?, formats?, trendSources?, relatedEntities? }
-
+  topicUpdate  Json?
   createdAt    DateTime   @default(now())
 
   @@index([topicDraftId])
@@ -830,37 +997,41 @@ model TopicMessage {
 }
 
 model ImageGenHistory {
-  id            String   @id @default(uuid())
-  prompt        String   @db.Text
-  revisedPrompt String?  @db.Text
-  provider      String                        // dalle, flux-pro, flux-schnell
-  imageUrl      String   @db.Text
+  id            String    @id @default(uuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  prompt        String    @db.Text
+  revisedPrompt String?   @db.Text
+  provider      String
+  imageUrl      String    @db.Text
   width         Int
   height        Int
-  aspectRatio   String   @default("square")   // landscape, square, portrait
-  purpose       String   @default("general")  // hero, background, editorial, etc.
-  costUsd       Float    @default(0)
-  elapsedMs     Int      @default(0)
-  createdAt     DateTime @default(now())
+  aspectRatio   String    @default("square")
+  purpose       String    @default("general")
+  costUsd       Float     @default(0)
+  elapsedMs     Int       @default(0)
+  createdAt     DateTime  @default(now())
 
-  @@index([provider])
+  @@index([workspaceId, provider])
   @@index([createdAt])
   @@map("image_gen_history")
 }
 
-// ---------------------------------------------------------------------------
-// Instagram Reference Account Monitoring
-// ---------------------------------------------------------------------------
+// ═══════════════════════════════════════════════════════════════════════════
+// REFERENCE ACCOUNT MONITORING
+// ═══════════════════════════════════════════════════════════════════════════
 
 model ReferenceAccount {
   id              String    @id @default(uuid())
-  platform        String    @default("instagram") // future: tiktok, youtube
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  platform        String    @default("instagram")
   username        String
   platformUserId  String?
   displayName     String    @default("")
   profileImageUrl String    @default("")
   followersCount  Int       @default(0)
-  category        String    @default("artist") // "artist" | "label" | "venue" | "media" | "festival"
+  category        String    @default("")  // niche-defined; was hardcoded "artist" | "label" | etc.
   tags            String[]  @default([])
   isActive        Boolean   @default(true)
   lastSyncedAt    DateTime?
@@ -868,10 +1039,10 @@ model ReferenceAccount {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  feeds           ReferenceFeed[]
+  feeds ReferenceFeed[]
 
-  @@unique([platform, username])
-  @@index([platform, isActive])
+  @@unique([workspaceId, platform, username])
+  @@index([workspaceId, platform, isActive])
   @@map("reference_accounts")
 }
 
@@ -880,7 +1051,7 @@ model ReferenceFeed {
   referenceAccountId String
   account            ReferenceAccount @relation(fields: [referenceAccountId], references: [id], onDelete: Cascade)
   platformPostId     String           @unique
-  postType           String           @default("image") // "image" | "video" | "carousel_album" | "reel"
+  postType           String           @default("image")
   permalink          String           @default("")
   caption            String           @default("") @db.Text
   thumbnailUrl       String           @default("")
@@ -897,44 +1068,47 @@ model ReferenceFeed {
   @@map("reference_feeds")
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// BRAND KIT
+// ═══════════════════════════════════════════════════════════════════════════
+
 model BrandKit {
-  id              String   @id @default(uuid())
-  userId          String
-  name            String   @default("Default Brand Kit")
-  isDefault       Boolean  @default(false)
-  // Colors
-  colorPrimary    String   @default("#6C5CE7")
-  colorAccent     String   @default("#10b981")
-  colorBgDark     String   @default("#0a0a0a")
-  colorBgLight    String   @default("#f8f9fa")
-  colorText       String   @default("#1a1a1a")
-  // Typography
-  headingFont     String   @default("Pretendard")
-  bodyFont        String   @default("Noto Sans KR")
-  // Layout
-  safeMargin      Int      @default(60)
-  borderRadius    Int      @default(16)
-  // Assets
-  logoUrl         String?
-  logomarkUrl     String?
-  // Custom JSON for extended settings
-  extendedJson    String?  @db.Text
+  id            String    @id @default(uuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name          String    @default("Default Brand Kit")
+  isDefault     Boolean   @default(false)
+  colorPrimary  String    @default("#6C5CE7")
+  colorAccent   String    @default("#10b981")
+  colorBgDark   String    @default("#0a0a0a")
+  colorBgLight  String    @default("#f8f9fa")
+  colorText     String    @default("#1a1a1a")
+  headingFont   String    @default("Pretendard")
+  bodyFont      String    @default("Noto Sans KR")
+  safeMargin    Int       @default(60)
+  borderRadius  Int       @default(16)
+  logoUrl       String?
+  logomarkUrl   String?
+  extendedJson  String?   @db.Text
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@index([userId])
+  @@index([workspaceId])
   @@map("brand_kits")
 }
 
-// ─── Multi-Agent Autonomous System ──────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTI-AGENT AUTONOMOUS SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
 
 model AgentRun {
   id           String    @id @default(uuid())
-  agentName    String    // chief-editor | trend-scout | content-producer | design-director | growth-analyst | community-manager
-  triggerType  String    // cron | event | manual
-  triggerRef   String    @default("") // event name or cron expression
-  status       String    @default("running") // running | completed | failed
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  agentName    String
+  triggerType  String
+  triggerRef   String    @default("")
+  status       String    @default("running")
   inputJson    Json?
   outputJson   Json?
   errorMessage String?   @db.Text
@@ -943,9 +1117,9 @@ model AgentRun {
   startedAt    DateTime  @default(now())
   completedAt  DateTime?
 
-  logs         AgentLog[]
+  logs AgentLog[]
 
-  @@index([agentName, startedAt])
+  @@index([workspaceId, agentName, startedAt])
   @@index([status])
   @@map("agent_runs")
 }
@@ -954,7 +1128,7 @@ model AgentLog {
   id         String   @id @default(uuid())
   agentRunId String
   run        AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
-  level      String   @default("info") // debug | info | warn | error
+  level      String   @default("info")
   message    String   @db.Text
   metadata   Json?
   createdAt  DateTime @default(now())
@@ -964,64 +1138,74 @@ model AgentLog {
 }
 
 model WeeklyPlan {
-  id           String   @id @default(uuid())
-  weekStart    DateTime @db.Date
-  weekEnd      DateTime @db.Date
-  strategyJson Json     // { theme, goals, topicSlots, contentMix }
-  statusJson   Json?    // { completed, inProgress, cancelled }
+  id           String    @id @default(uuid())
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  weekStart    DateTime  @db.Date
+  weekEnd      DateTime  @db.Date
+  strategyJson Json
+  statusJson   Json?
   agentRunId   String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  briefings    DailyBriefing[]
+  briefings DailyBriefing[]
 
-  @@index([weekStart])
+  @@index([workspaceId, weekStart])
   @@map("weekly_plans")
 }
 
 model DailyBriefing {
   id              String      @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   date            DateTime    @db.Date
   weeklyPlanId    String?
   plan            WeeklyPlan? @relation(fields: [weeklyPlanId], references: [id])
-  assignmentsJson Json        // [{ topic, agentTarget, priority, persona, deadline }]
+  assignmentsJson Json
   trendSummary    String      @default("") @db.Text
-  statusJson      Json?       // per-assignment status tracking
+  statusJson      Json?
   agentRunId      String?
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
-  @@unique([date])
+  @@unique([workspaceId, date])
   @@index([weeklyPlanId])
   @@map("daily_briefings")
 }
 
 model ImageGate {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   agentRunId     String
   topic          String
-  articleSummary String   @default("") @db.Text
-  candidates     Json     // ImageSearchResult[] — searched candidates
-  selectedUrls   String[] @default([])
-  status         String   @default("pending") // pending | selected | skipped
-  platforms      String[] @default([])
+  articleSummary String    @default("") @db.Text
+  candidates     Json
+  selectedUrls   String[]  @default([])
+  status         String    @default("pending")
+  platforms      String[]  @default([])
   personaId      String?
   pipelineRunId  String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  @@index([status])
+  @@index([workspaceId, status])
   @@index([createdAt])
   @@map("image_gates")
 }
 
-// ── Newsletter System ────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// NEWSLETTER SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
 
 model Subscriber {
   id             String    @id @default(uuid())
-  email          String    @unique
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  email          String
   name           String    @default("")
-  status         String    @default("active") // active | unsubscribed | bounced
+  status         String    @default("active")
   segments       String[]  @default([])
   subscribedAt   DateTime  @default(now())
   unsubscribedAt DateTime?
@@ -1029,138 +1213,155 @@ model Subscriber {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  @@index([status])
+  @@unique([workspaceId, email])
+  @@index([workspaceId, status])
   @@map("subscribers")
 }
 
 model NewsletterIssue {
-  id             String               @id @default(uuid())
+  id             String    @id @default(uuid())
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   subject        String
   subjectB       String?
-  bodyHtml       String               @db.Text
-  bodyText       String               @db.Text
-  articleIds     String[]             @default([])
-  status         String               @default("draft") // draft | scheduled | sending | sent | failed
+  bodyHtml       String    @db.Text
+  bodyText       String    @db.Text
+  articleIds     String[]  @default([])
+  status         String    @default("draft")
   scheduledAt    DateTime?
   sentAt         DateTime?
-  recipientCount Int                  @default(0)
+  recipientCount Int       @default(0)
   openRate       Float?
   clickRate      Float?
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
-  campaigns      NewsletterCampaign[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  @@index([status])
+  campaigns NewsletterCampaign[]
+
+  @@index([workspaceId, status])
   @@map("newsletter_issues")
 }
 
 model NewsletterCampaign {
-  id             String          @id @default(uuid())
-  issueId        String
-  issue          NewsletterIssue @relation(fields: [issueId], references: [id])
-  segment        String
-  variant        String          @default("A") // A | B
-  recipientCount Int             @default(0)
-  sentCount      Int             @default(0)
-  openCount      Int             @default(0)
-  clickCount     Int             @default(0)
+  id              String          @id @default(uuid())
+  issueId         String
+  issue           NewsletterIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  segment         String
+  variant         String          @default("A")
+  recipientCount  Int             @default(0)
+  sentCount       Int             @default(0)
+  openCount       Int             @default(0)
+  clickCount      Int             @default(0)
   externalBatchId String?
-  status         String          @default("pending") // pending | sending | sent | failed
-  createdAt      DateTime        @default(now())
+  status          String          @default("pending")
+  createdAt       DateTime        @default(now())
 
   @@index([issueId])
   @@map("newsletter_campaigns")
 }
 
-// ── Monetization System ──────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// MONETIZATION SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
 
 model SponsorDeal {
   id           String    @id @default(uuid())
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sponsorName  String
   contactEmail String    @default("")
-  dealType     String    // sponsored-post | banner | newsletter-mention | series
-  status       String    @default("negotiating") // negotiating | active | completed | cancelled
+  dealType     String
+  status       String    @default("negotiating")
   totalValue   Float     @default(0)
   paidAmount   Float     @default(0)
   currency     String    @default("KRW")
-  deliverables Json?     // [{ type, description, deadline, completed }]
+  deliverables Json?
   startDate    DateTime?
   endDate      DateTime?
   notes        String    @default("") @db.Text
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  @@index([status])
+  @@index([workspaceId, status])
   @@map("sponsor_deals")
 }
 
 model AffiliateLink {
-  id              String   @id @default(uuid())
-  platform        String   // coupang | yes24 | interpark | amazon
-  targetUrl       String   @db.Text
-  affiliateUrl    String   @db.Text
-  keywords        String[] @default([])
-  label           String   @default("")
-  clickCount      Int      @default(0)
-  conversionCount Int      @default(0)
-  revenueTotal    Float    @default(0)
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id              String    @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  platform        String
+  targetUrl       String    @db.Text
+  affiliateUrl    String    @db.Text
+  keywords        String[]  @default([])
+  label           String    @default("")
+  clickCount      Int       @default(0)
+  conversionCount Int       @default(0)
+  revenueTotal    Float     @default(0)
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  @@index([isActive])
+  @@index([workspaceId, isActive])
   @@map("affiliate_links")
 }
 
 model RevenueEvent {
-  id          String   @id @default(uuid())
-  source      String   // sponsor | affiliate | ad | subscription
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  source      String    // sponsor | affiliate | ad | subscription
   amount      Float
-  currency    String   @default("KRW")
+  currency    String    @default("KRW")
   referenceId String?
   blogPostId  String?
-  description String   @default("")
-  eventDate   DateTime @default(now())
-  createdAt   DateTime @default(now())
+  description String    @default("")
+  eventDate   DateTime  @default(now())
+  createdAt   DateTime  @default(now())
 
-  @@index([source, eventDate])
+  @@index([workspaceId, source, eventDate])
   @@index([blogPostId])
   @@map("revenue_events")
 }
 
-// ── Partnership System ───────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// PARTNERSHIP SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
 
 model Partner {
-  id                String              @id @default(uuid())
-  name              String
-  type              String              // artist | label | venue | festival | media | brand
-  contactName       String              @default("")
-  contactEmail      String              @default("")
-  contactPhone      String              @default("")
-  status            String              @default("prospect") // prospect | active | inactive | churned
-  warmthScore       Int                 @default(0) // 0-100
-  musicArtistId     String?
-  notes             String              @default("") @db.Text
-  lastContactAt     DateTime?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
+  id            String    @id @default(uuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name          String
+  type          String    // niche-defined; was "artist | label | venue | festival | media | brand"
+  contactName   String    @default("")
+  contactEmail  String    @default("")
+  contactPhone  String    @default("")
+  status        String    @default("prospect")
+  warmthScore   Int       @default(0)
+  musicArtistId String?   // populated only for niche=music
+  notes         String    @default("") @db.Text
+  lastContactAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
   collaborations    Collaboration[]
   outreachCampaigns OutreachCampaign[]
 
-  @@index([status])
-  @@index([type])
+  @@index([workspaceId, status])
+  @@index([workspaceId, type])
   @@map("partners")
 }
 
 model Collaboration {
   id           String    @id @default(uuid())
   partnerId    String
-  partner      Partner   @relation(fields: [partnerId], references: [id])
+  partner      Partner   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
   title        String
-  type         String    // guest-post | interview | cross-promotion | sponsored | event-coverage
-  status       String    @default("proposed") // proposed | in-progress | completed | cancelled
+  type         String
+  status       String    @default("proposed")
   description  String    @default("") @db.Text
-  deliverables Json?     // [{ item, deadline, status }]
+  deliverables Json?
   blogPostIds  String[]  @default([])
   startDate    DateTime?
   endDate      DateTime?
@@ -1174,12 +1375,14 @@ model Collaboration {
 
 model OutreachCampaign {
   id             String    @id @default(uuid())
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   partnerId      String?
   partner        Partner?  @relation(fields: [partnerId], references: [id])
   targetName     String
-  targetType     String    // artist | label | venue etc.
+  targetType     String
   targetEmail    String    @default("")
-  status         String    @default("draft") // draft | sent | replied | accepted | declined | no-response
+  status         String    @default("draft")
   messageSubject String    @default("")
   messageBody    String    @default("") @db.Text
   sentAt         DateTime?
@@ -1189,6 +1392,6 @@ model OutreachCampaign {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  @@index([status])
+  @@index([workspaceId, status])
   @@map("outreach_campaigns")
 }
