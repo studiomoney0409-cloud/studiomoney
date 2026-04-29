@@ -1,5 +1,9 @@
 import { callGptSafe } from "@/lib/llm";
 import type { PipelineOutline, PersonaContext, ContentType, ResearchPacket, Citation } from "./types";
+import { DEFAULT_NICHE_CONTEXT, type NicheContext } from "@/lib/niche/context";
+
+const FALLBACK_WRITER_INTRO = "You are a skilled professional writer.";
+const FALLBACK_PERSONA_INTRO = "a professional writer";
 
 /** Numbered source reference for citation tracking */
 export interface NumberedSource {
@@ -55,15 +59,21 @@ export async function generateDraft(
     editorFeedback?: string;
     /** Override LLM model (default: gpt-4o for blog/review, gpt-4o-mini for sns/carousel) */
     model?: string;
+    nicheContext?: NicheContext;
   },
 ): Promise<string> {
-  const systemPrompt = buildSystemPrompt(opts?.persona ?? null, opts?.contentType ?? "blog");
+  const ctx = opts?.nicheContext ?? DEFAULT_NICHE_CONTEXT;
+  const systemPrompt = buildSystemPrompt(opts?.persona ?? null, opts?.contentType ?? "blog", ctx);
 
   const feedbackSection = opts?.editorFeedback
     ? `\n\n--- EDITOR FEEDBACK (apply these corrections) ---\n${opts.editorFeedback}\n--- END FEEDBACK ---`
     : "";
 
   const researchSection = buildResearchContext(opts?.research);
+
+  const writeLanguageRule = ctx.language === "ko"
+    ? "- Write entirely in Korean (English terms for proper names are OK)"
+    : `- Write entirely in ${ctx.language}`;
 
   const userPrompt = `Write a complete blog article based on this outline.
 
@@ -83,7 +93,7 @@ SEO KEYWORDS (weave naturally): ${outline.seoKeywords.join(", ")}
 ${researchSection}${feedbackSection}
 
 Requirements:
-- Write entirely in Korean (English terms for music/brand names are OK)
+${writeLanguageRule}
 - Start with a compelling hook (not "오늘은 ~에 대해 알아보겠습니다" pattern)
 - Use markdown formatting: # for title, ## for sections, ### for sub-sections
 - Include specific examples, data, or references where relevant
@@ -108,16 +118,20 @@ Return ONLY the markdown content.`;
   });
 }
 
-function buildSystemPrompt(persona: PersonaContext | null, contentType: ContentType): string {
+function buildSystemPrompt(persona: PersonaContext | null, contentType: ContentType, ctx: NicheContext): string {
+  const intro = ctx.promptHints?.trim() || FALLBACK_WRITER_INTRO;
+
   if (!persona) {
-    return `You are a skilled Korean music/culture magazine writer.
-Write with passion, specificity, and cultural insight.
+    return `${intro}
+Write with passion, specificity, and insight.
 Avoid generic filler phrases and clickbait.`;
   }
 
-  const parts = [
-    `You are "${persona.name}", a writer for a Korean music/culture magazine.`,
-  ];
+  const personaIntro = ctx.promptHints?.trim()
+    ? `You are "${persona.name}". ${ctx.promptHints.trim()}`
+    : `You are "${persona.name}", ${FALLBACK_PERSONA_INTRO}.`;
+
+  const parts = [personaIntro];
 
   // Identity
   if (persona.perspective) {
@@ -193,7 +207,7 @@ Avoid generic filler phrases and clickbait.`;
   parts.push(
     "- Maintain this voice consistently throughout the article",
     "- Avoid generic AI-sounding phrases",
-    "- Be specific — reference actual songs, albums, artists, dates",
+    "- Be specific — reference actual entities, names, dates relevant to the topic",
   );
 
   // Golden example (single best example to save tokens)

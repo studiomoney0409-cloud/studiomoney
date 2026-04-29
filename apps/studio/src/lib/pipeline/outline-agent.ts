@@ -1,5 +1,8 @@
 import { callGptJson } from "@/lib/llm";
 import type { PipelineOutline, PersonaContext, ResearchPacket } from "./types";
+import { DEFAULT_NICHE_CONTEXT, type NicheContext } from "@/lib/niche/context";
+
+const FALLBACK_INTRO = "You are a professional editorial planner.";
 
 /**
  * Outline Agent — generates structured outline from a topic.
@@ -12,9 +15,12 @@ export async function generateOutline(
     contentType?: string;
     targetWordCount?: number;
     research?: ResearchPacket;
+    nicheContext?: NicheContext;
   },
 ): Promise<PipelineOutline> {
   const targetWordCount = opts?.targetWordCount ?? 2000;
+  const ctx = opts?.nicheContext ?? DEFAULT_NICHE_CONTEXT;
+  const intro = ctx.promptHints?.trim() || FALLBACK_INTRO;
 
   const personaSection = opts?.persona
     ? `
@@ -26,7 +32,7 @@ Structure preferences: ${JSON.stringify(opts.persona.structure ?? {})}`
 
   const researchSection = buildResearchSection(opts?.research);
 
-  const prompt = `You are a professional editorial planner for a Korean music/culture magazine.
+  const prompt = `${intro}
 
 Generate a detailed blog post outline for the topic: "${topic}"
 

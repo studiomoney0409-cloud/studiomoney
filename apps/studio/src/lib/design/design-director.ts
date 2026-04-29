@@ -193,7 +193,7 @@ ${input.styleHint}
 `;
   }
 
-  const prompt = `You are a creative director for a Korean music/culture web magazine's design team.
+  const prompt = `You are a creative director for a web magazine's design team.${input.nicheHints ? ` Editorial context: ${input.nicheHints}` : ""}
 
 Analyze the content below and produce a design brief that will guide visual designers, motion designers, and data visualization agents.
 

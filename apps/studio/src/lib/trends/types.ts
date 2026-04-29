@@ -10,5 +10,12 @@ export interface TrendItem {
 
 export interface TrendProvider {
   name: string;
-  fetch(opts?: { keywords?: string[]; geo?: string }): Promise<TrendItem[]>;
+  fetch(opts?: TrendProviderOpts): Promise<TrendItem[]>;
+}
+
+export interface TrendProviderOpts {
+  keywords?: string[];
+  geo?: string;
+  /** Reddit-only: subreddits to query. When omitted, provider uses its default. */
+  subreddits?: string[];
 }

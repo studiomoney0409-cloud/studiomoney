@@ -1,6 +1,9 @@
 import { callGptJson } from "@/lib/llm";
 import type { PipelineOutline, QualityScore, EditorResult, ContentRules, ResearchPacket } from "./types";
 import { numberSources } from "./writer-agent";
+import { DEFAULT_NICHE_CONTEXT, type NicheContext } from "@/lib/niche/context";
+
+const FALLBACK_EDITOR_INTRO = "Senior editor.";
 
 const QUALITY_THRESHOLD = 70;
 
@@ -24,8 +27,11 @@ export async function evaluateAndEdit(
     styleFingerprint?: string;
     contentRules?: ContentRules | null;
     research?: ResearchPacket | null;
+    nicheContext?: NicheContext;
   },
 ): Promise<EditorResult> {
+  const ctx = opts?.nicheContext ?? DEFAULT_NICHE_CONTEXT;
+  const intro = ctx.promptHints?.trim() || FALLBACK_EDITOR_INTRO;
   const voiceRef = opts?.styleFingerprint
     ? `\nVoice reference: ${opts.styleFingerprint}`
     : "";
@@ -41,7 +47,7 @@ export async function evaluateAndEdit(
     ? `\nCitation check: verify all [N] references in the text match the AVAILABLE SOURCES list. Flag fabricated citations (numbers not in sources) or major uncited factual claims. Add issues to "citationIssues" array.`
     : "";
 
-  const prompt = `Senior editor for a Korean music/culture magazine. Score the draft on 5 dimensions (0-100), give actionable feedback, and apply light edits preserving voice.
+  const prompt = `${intro} Acting as senior editor: score the draft on 5 dimensions (0-100), give actionable feedback, and apply light edits preserving voice.
 
 OUTLINE: ${outline.title} | Angle: ${outline.angle} | SEO: ${outline.seoKeywords.join(", ")} | Min ${outline.targetWordCount} words${voiceRef}
 ${contentRulesSection}${citationRef}

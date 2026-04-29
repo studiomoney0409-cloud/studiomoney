@@ -3,8 +3,8 @@ import { fetchWithTimeout } from "@/lib/fetch-utils";
 
 const REDDIT_BASE = "https://www.reddit.com";
 
-// Music/culture subreddits relevant to a Korean music web magazine
-const DEFAULT_SUBREDDITS = ["kpop", "khiphop", "koreanmusic", "indieheads", "hiphopheads"];
+// Fallback subs when caller does not specify any (preserves legacy music behavior).
+const FALLBACK_SUBREDDITS = ["kpop", "khiphop", "koreanmusic", "indieheads", "hiphopheads"];
 
 const USER_AGENT = "web-magazine-studio/1.0 (trend aggregator)";
 
@@ -24,27 +24,28 @@ interface RedditPost {
 /**
  * Reddit trend provider — subreddit hot posts + keyword search.
  * Uses Reddit's public JSON API (no auth required, rate-limited to ~60 req/min).
- * Subreddits: kpop, khiphop, koreanmusic, indieheads, hiphopheads
+ * Subreddits come from opts.subreddits (set by NicheContext); falls back to music subs.
  */
 export const redditProvider: TrendProvider = {
   name: "reddit",
   async fetch(opts) {
+    const subs = opts?.subreddits?.length ? opts.subreddits : FALLBACK_SUBREDDITS;
     const [hotItems, keywordItems] = await Promise.all([
-      fetchHotPosts(),
-      fetchKeywordPosts(opts?.keywords ?? []),
+      fetchHotPosts(subs),
+      fetchKeywordPosts(opts?.keywords ?? [], subs),
     ]);
     return [...hotItems, ...keywordItems];
   },
 };
 
 /**
- * Fetch hot posts from music subreddits (top 3 per subreddit).
+ * Fetch hot posts from the given subreddits (top 3 per subreddit).
  * Sequential with small delay to respect Reddit rate limits.
  */
-async function fetchHotPosts(): Promise<TrendItem[]> {
+async function fetchHotPosts(subreddits: string[]): Promise<TrendItem[]> {
   const items: TrendItem[] = [];
 
-  for (const sub of DEFAULT_SUBREDDITS) {
+  for (const sub of subreddits) {
     try {
       const url = `${REDDIT_BASE}/r/${sub}/hot.json?limit=3&raw_json=1`;
       const res = await fetchWithTimeout(url, {
@@ -84,16 +85,16 @@ async function fetchHotPosts(): Promise<TrendItem[]> {
  * Max 3 keywords, sequential with delay.
  * Endpoint: /search.json?q={keyword}&sort=new&limit=5
  */
-async function fetchKeywordPosts(keywords: string[]): Promise<TrendItem[]> {
-  if (keywords.length === 0) return [];
+async function fetchKeywordPosts(keywords: string[], subreddits: string[]): Promise<TrendItem[]> {
+  if (keywords.length === 0 || subreddits.length === 0) return [];
 
   const items: TrendItem[] = [];
-  const musicSubs = DEFAULT_SUBREDDITS.join("+");
+  const subsParam = subreddits.join("+");
 
   for (const kw of keywords.slice(0, 3)) {
     try {
       const url =
-        `${REDDIT_BASE}/r/${musicSubs}/search.json` +
+        `${REDDIT_BASE}/r/${subsParam}/search.json` +
         `?q=${encodeURIComponent(kw)}&sort=new&restrict_sr=on&limit=5&raw_json=1`;
       const res = await fetchWithTimeout(url, {
         timeout: 8_000,

@@ -250,6 +250,8 @@ export interface BenchmarkReport {
 
 export interface DesignQualityRecord {
   designId: string;
+  /** Workspace owning this record. Optional for legacy single-tenant callers; resolved to default workspace when omitted. */
+  workspaceId?: string;
   contentType: DesignContentType;
   format: DesignFormat;
   platform: DesignPlatform;
@@ -282,6 +284,8 @@ export interface DesignEngineInput {
   };
   /** Performance-based style recommendation hint for the Design Director LLM */
   styleHint?: string;
+  /** Niche/domain context injected into the design director prompt (e.g. "한국 음악 매거진"). */
+  nicheHints?: string;
   skip?: {
     cardNews?: boolean;
     motionGraphic?: boolean;

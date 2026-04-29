@@ -1,12 +1,14 @@
-import type { TrendItem } from "./types";
+import type { TrendItem, TrendProvider } from "./types";
 import { naverDatalabProvider } from "./naver-datalab";
 import { naverSearchProvider } from "./naver-search";
 import { youtubeProvider } from "./youtube";
 import { googleTrendsProvider } from "./google";
 import { spotifyProvider } from "./spotify";
 import { redditProvider } from "./reddit";
+import { hackerNewsProvider } from "./hackernews";
 import { logger } from "@/lib/logger";
 import { cacheGetJSON, cacheSetJSON } from "@/lib/redis";
+import { DEFAULT_NICHE_CONTEXT, type NicheContext } from "@/lib/niche/context";
 
 export type { TrendItem } from "./types";
 export type { EnrichedTrendItem } from "./enrich";
@@ -30,75 +32,83 @@ function keyHash(kws: string[]): string {
   return kws.sort().join("|");
 }
 
-function trendCacheKey(kh: string): string {
-  return `trends:${kh}`;
+function trendCacheKey(kh: string, niche: string): string {
+  return `trends:${niche}:${kh}`;
 }
 
 // ---------------------------------------------------------------------------
-// Global trend providers (support both general + keyword search)
+// Provider selection — driven by NicheContext.trendSources flags
 // ---------------------------------------------------------------------------
 
-const globalProviders = [
-  googleTrendsProvider,
-  youtubeProvider,
-  spotifyProvider,
-  redditProvider,
-  // hackerNewsProvider — removed: not relevant to music/culture magazine domain
-];
+function selectGlobalProviders(ctx: NicheContext): TrendProvider[] {
+  const out: TrendProvider[] = [];
+  const s = ctx.trendSources;
+  if (s.google) out.push(googleTrendsProvider);
+  if (s.youtube) out.push(youtubeProvider);
+  if (s.reddit) out.push(redditProvider);
+  if (s.spotify) out.push(spotifyProvider);
+  if (s.hackernews) out.push(hackerNewsProvider);
+  return out;
+}
 
-// ---------------------------------------------------------------------------
-// Niche trend providers (keyword-dependent, Korean-focused)
-// ---------------------------------------------------------------------------
-
-const nicheProviders = [naverDatalabProvider, naverSearchProvider];
+function selectNicheProviders(ctx: NicheContext): TrendProvider[] {
+  const out: TrendProvider[] = [];
+  const s = ctx.trendSources;
+  if (s.naverDataLab) out.push(naverDatalabProvider);
+  if (s.naverSearch) out.push(naverSearchProvider);
+  return out;
+}
 
 /**
- * Fetch trends from all providers.
- * - Global trends: Google Trends, YouTube KR, HackerNews (+ keyword search when provided)
- * - Niche trends (if keywords provided): Naver DataLab + Naver News/Blog search
+ * Fetch trends from all providers configured by the workspace's NicheContext.
+ * - Global trends: providers flagged in ctx.trendSources (Google/YouTube/Reddit/Spotify/HN)
+ * - Niche trends (if keywords provided): Naver DataLab/Search when enabled
  *
- * Results are cached for 15 minutes.
+ * Results are cached for 15 minutes per (niche, keyword-hash) pair.
  */
 export async function fetchTrends(
   topicKeywords?: string[],
+  ctx: NicheContext = DEFAULT_NICHE_CONTEXT,
 ): Promise<{ global: TrendItem[]; niche: TrendItem[] }> {
   const kws = topicKeywords ?? [];
   const kh = keyHash(kws);
 
-  // L1: in-memory same-process hit
-  if (memCache && memCache.keyHash === kh && Date.now() - memCache.fetchedAt < CACHE_TTL_SEC * 1000) {
+  // L1: in-memory same-process hit (per niche)
+  if (memCache && memCache.keyHash === `${ctx.niche}:${kh}` && Date.now() - memCache.fetchedAt < CACHE_TTL_SEC * 1000) {
     return { global: memCache.items, niche: memCache.nicheItems };
   }
 
   // L2: Redis shared cache
-  const redisHit = await cacheGetJSON<CacheEntry>(trendCacheKey(kh));
+  const cacheKey = trendCacheKey(kh, ctx.niche);
+  const redisHit = await cacheGetJSON<CacheEntry>(cacheKey);
   if (redisHit && Date.now() - redisHit.fetchedAt < CACHE_TTL_SEC * 1000) {
     memCache = redisHit;
     return { global: redisHit.items, niche: redisHit.nicheItems };
   }
 
+  const globalProviders = selectGlobalProviders(ctx);
+  const nicheProviders = selectNicheProviders(ctx);
+
   // Lazy-load Instagram ref provider (heavy deps — avoid module-level import)
-  let igProvider: typeof globalProviders[number] | null = null;
-  try {
-    const mod = await import("./instagram-ref");
-    igProvider = mod.instagramRefProvider;
-  } catch {
-    logger.warn("instagram-ref provider unavailable (DB migration may be pending)");
+  let igProvider: TrendProvider | null = null;
+  if (ctx.trendSources.instagramRef) {
+    try {
+      const mod = await import("./instagram-ref");
+      igProvider = mod.instagramRefProvider;
+    } catch {
+      logger.warn("instagram-ref provider unavailable (DB migration may be pending)");
+    }
   }
 
-  const allGlobalProviders = igProvider
-    ? [igProvider, ...globalProviders]
-    : globalProviders;
+  const allGlobalProviders = igProvider ? [igProvider, ...globalProviders] : globalProviders;
 
-  // Fetch global + niche in parallel; pass keywords to global providers too
+  const providerOpts = { keywords: kws, geo: ctx.region, subreddits: ctx.redditSubs };
+
+  // Fetch global + niche in parallel
   const [globalResults, nicheResults] = await Promise.all([
-    Promise.allSettled(
-      allGlobalProviders.map((p) => p.fetch({ keywords: kws, geo: "KR" })),
-    ),
+    Promise.allSettled(allGlobalProviders.map((p) => p.fetch(providerOpts))),
     kws.length > 0
-      ? Promise.allSettled(
-          nicheProviders.map((p) => p.fetch({ keywords: kws, geo: "KR" })),
-        )
+      ? Promise.allSettled(nicheProviders.map((p) => p.fetch(providerOpts)))
       : Promise.resolve([]),
   ]);
 
@@ -120,9 +130,9 @@ export async function fetchTrends(
     }
   });
 
-  const entry: CacheEntry = { items: globalItems, nicheItems, fetchedAt: Date.now(), keyHash: kh };
+  const entry: CacheEntry = { items: globalItems, nicheItems, fetchedAt: Date.now(), keyHash: `${ctx.niche}:${kh}` };
   memCache = entry;
-  void cacheSetJSON(trendCacheKey(kh), entry, CACHE_TTL_SEC);
+  void cacheSetJSON(cacheKey, entry, CACHE_TTL_SEC);
   return { global: globalItems, niche: nicheItems };
 }
 
@@ -200,7 +210,7 @@ export function formatEnrichedTrendsForPrompt(
   }
 
   if (igItems.length > 0) {
-    parts.push("## 인스타그램 레퍼런스 피드 (아티스트/레이블 직접 게시)");
+    parts.push("## 인스타그램 레퍼런스 피드 (모니터링 계정 직접 게시)");
     parts.push(
       ...igItems.slice(0, maxPerSection).map(formatItem),
     );
