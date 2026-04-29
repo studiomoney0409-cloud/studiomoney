@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { json, notFound, badRequest, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 /** GET /api/publish/:id */
 export async function GET(
@@ -7,8 +8,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
-    const pub = await prisma.publication.findUnique({ where: { id } });
+    const pub = await prisma.publication.findFirst({ where: { id, workspaceId: workspace.id } });
     if (!pub) return notFound("Publication not found");
     return json(pub);
   } catch (e) {
@@ -22,8 +26,11 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
-    const pub = await prisma.publication.findUnique({ where: { id } });
+    const pub = await prisma.publication.findFirst({ where: { id, workspaceId: workspace.id } });
     if (!pub) return notFound("Publication not found");
     if (pub.status === "published" || pub.status === "publishing") {
       return badRequest("Cannot delete a published or publishing publication");

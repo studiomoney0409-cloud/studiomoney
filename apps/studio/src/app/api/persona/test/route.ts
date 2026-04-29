@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { prisma } from "@/lib/db";
 import { json, badRequest, notFound, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 const openai = new OpenAI();
 
@@ -10,12 +11,16 @@ const openai = new OpenAI();
  */
 export async function POST(req: Request) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const body = (await req.json()) as { personaId?: string; topic?: string };
     if (!body.personaId) return badRequest("personaId is required");
     if (!body.topic?.trim()) return badRequest("topic is required");
 
-    const persona = await prisma.writingPersona.findUnique({
-      where: { id: body.personaId },
+    const persona = await prisma.writingPersona.findFirst({
+      where: { id: body.personaId, workspaceId: workspace.id },
     });
     if (!persona) return notFound("Persona not found");
 

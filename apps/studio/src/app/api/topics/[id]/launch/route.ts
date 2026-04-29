@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { json, badRequest, notFound, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 /** POST /api/topics/[id]/launch — launch content pipeline from refined topic */
 export async function POST(
@@ -7,6 +8,10 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const { id } = await params;
     const body = (await req.json()) as {
       target: string;
@@ -18,13 +23,12 @@ export async function POST(
       return badRequest("target must be one of: blog, sns, design, e2e");
     }
 
-    const draft = await prisma.topicDraft.findUnique({ where: { id } });
+    const draft = await prisma.topicDraft.findFirst({ where: { id, workspaceId: workspace.id } });
     if (!draft) return notFound("Draft not found");
 
     const formats = draft.formats as Record<string, string> | null;
     const personaId = body.personaId ?? draft.personaId;
 
-    // Mark draft as sent
     await prisma.topicDraft.update({
       where: { id },
       data: { status: "sent" },
@@ -32,9 +36,9 @@ export async function POST(
 
     switch (target) {
       case "blog": {
-        // Create a PipelineRun and link to draft
         const run = await prisma.pipelineRun.create({
           data: {
+            workspaceId: workspace.id,
             topic: draft.topic,
             angle: draft.angle,
             contentType: draft.contentType,
@@ -69,7 +73,6 @@ export async function POST(
       }
 
       case "e2e": {
-        // Return the topic/persona info for the client to call /api/pipeline/e2e
         return json({
           topic: draft.topic,
           contentType: draft.contentType,

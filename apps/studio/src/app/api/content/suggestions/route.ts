@@ -3,6 +3,8 @@ import { callGptJson } from "@/lib/llm";
 import { fetchTrends, formatEnrichedTrendsForPrompt } from "@/lib/trends";
 import { json, serverError } from "@/lib/studio";
 import { z } from "zod";
+import { workspaceGuard } from "@/lib/auth/route-guard";
+import { nicheContextFromWorkspace } from "@/lib/niche/context";
 
 const SourceSchema = z.object({
   label: z.string(),
@@ -26,7 +28,6 @@ const SuggestionSchema = z.object({
 
 type SuggestionItem = z.infer<typeof SuggestionItemSchema>;
 
-/** LLM sometimes returns objects instead of strings for format fields — normalize */
 function normalizeSuggestions(raw: unknown): unknown {
   const obj = raw as { suggestions?: Array<Record<string, unknown>> };
   if (!obj?.suggestions) return { suggestions: [] };
@@ -47,7 +48,6 @@ function coerceStr(v: unknown): string {
   return "";
 }
 
-/** Safely parse LLM output into SuggestionItem[], returning [] on any failure */
 function safeParseSuggestions(raw: unknown): SuggestionItem[] {
   if (!raw) return [];
   try {
@@ -60,58 +60,50 @@ function safeParseSuggestions(raw: unknown): SuggestionItem[] {
   }
 }
 
-// In-memory cache (30 min)
+// In-memory cache (30 min) — keyed per workspace
 interface CacheEntry {
   suggestions: SuggestionItem[];
   keywords: string[];
   at: number;
 }
-let cache: CacheEntry | null = null;
+const cacheByWorkspace = new Map<string, CacheEntry>();
 const CACHE_TTL = 30 * 60 * 1000;
-
-async function loadNicheKeywords(): Promise<string[]> {
-  const row = await prisma.setting.findUnique({ where: { key: "niche-keywords" } });
-  if (!row) return [];
-  const data = row.value as { keywords?: string[] };
-  return data.keywords ?? [];
-}
 
 /**
  * GET /api/content/suggestions
  * Returns { suggestions: [...], keywords: [...] }
- * Keywords are required — returns empty suggestions if no keywords are set.
+ * Keywords come from workspace.keywords + active autopilot configs in this workspace.
  */
 export async function GET() {
   try {
-    // Gather all keywords (niche + autopilot)
-    const nicheKeywords = await loadNicheKeywords();
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
+    const tpl = await prisma.nicheTemplate.findUnique({ where: { niche: workspace.niche } });
+    const ctx = nicheContextFromWorkspace(workspace, tpl);
+
+    // Workspace keywords + active autopilot config keywords (workspace-scoped)
     const configs = await prisma.autopilotConfig.findMany({
-      where: { isActive: true },
+      where: { workspaceId: workspace.id, isActive: true },
       select: { topicKeywords: true },
     });
     const autopilotKws = [...new Set(configs.flatMap((c) => c.topicKeywords))];
-    const allKeywords = [...new Set([...nicheKeywords, ...autopilotKws])];
+    const allKeywords = [...new Set([...workspace.keywords, ...autopilotKws])];
 
-    // No keywords → no suggestions
     if (allKeywords.length === 0) {
       return json({ suggestions: [], keywords: [] });
     }
 
     const keywordHash = allKeywords.sort().join("|");
 
-    // Return cache if still fresh and keywords unchanged
-    if (
-      cache &&
-      Date.now() - cache.at < CACHE_TTL &&
-      cache.keywords.sort().join("|") === keywordHash
-    ) {
-      return json({ suggestions: cache.suggestions, keywords: cache.keywords });
+    const cached = cacheByWorkspace.get(workspace.id);
+    if (cached && Date.now() - cached.at < CACHE_TTL && cached.keywords.sort().join("|") === keywordHash) {
+      return json({ suggestions: cached.suggestions, keywords: cached.keywords });
     }
 
-    // Fetch trends using keywords
-    const { global: globalTrends, niche: nicheTrends } = await fetchTrends(allKeywords);
+    const { global: globalTrends, niche: nicheTrends } = await fetchTrends(allKeywords, ctx);
 
-    // Enrich trends with real-time context (non-fatal)
     let enrichedAll: import("@/lib/trends/enrich").EnrichedTrendItem[];
     try {
       const { enrichTrends } = await import("@/lib/trends/enrich");
@@ -126,9 +118,9 @@ export async function GET() {
       enrichedAll.filter((t) => nicheTrends.some((n) => n.title === t.title)),
     );
 
-    // Recent publications for context
+    // Recent publications in this workspace (for de-duplication context)
     const recentPubs = await prisma.publication.findMany({
-      where: { status: "published" },
+      where: { workspaceId: workspace.id, status: "published" },
       orderBy: { publishedAt: "desc" },
       take: 10,
       select: { content: true },
@@ -141,13 +133,13 @@ export async function GET() {
       .filter(Boolean)
       .slice(0, 5);
 
-    const topTopicsSection =
-      topTopics.length > 0
-        ? `최근 발행 콘텐츠 (중복 방지):\n${topTopics.map((t, i) => `${i + 1}. ${t}`).join("\n")}`
-        : "";
+    const topTopicsSection = topTopics.length > 0
+      ? `최근 발행 콘텐츠 (중복 방지):\n${topTopics.map((t, i) => `${i + 1}. ${t}`).join("\n")}`
+      : "";
 
-    // Single unified prompt — keyword-based, 6 suggestions
-    const prompt = `You are a content strategist for a Korean indie/band music web magazine.
+    const intro = ctx.promptHints?.trim() || "You are a content strategist.";
+
+    const prompt = `${intro}
 전문 분야 키워드: ${allKeywords.join(", ")}
 
 ${trendContext}
@@ -158,7 +150,7 @@ ${topTopicsSection}
 
 ## 규칙
 1. 반드시 키워드(${allKeywords.join(", ")})와 관련된 주제만 제안
-2. 일반 트렌드에서도 음악/밴드/공연과 연결할 수 있는 각도를 적극적으로 찾을 것
+2. 일반 트렌드에서도 이 매체의 주제 영역과 연결할 수 있는 각도를 적극적으로 찾을 것
 3. 다양한 각도에서 제안 (리뷰, 분석, 뉴스, 비하인드, 비교, 추천 등)
 4. 각 제안의 근거가 된 트렌드 데이터의 출처(sources)를 반드시 포함
 5. 트렌드 항목에 URL이 있으면 그대로 포함
@@ -192,9 +184,9 @@ Return JSON:
       console.error("[suggestions] LLM failed:", llmErr);
     }
 
-    cache = { suggestions, keywords: allKeywords, at: Date.now() };
+    cacheByWorkspace.set(workspace.id, { suggestions, keywords: allKeywords, at: Date.now() });
 
-    return json({ suggestions: cache.suggestions, keywords: cache.keywords });
+    return json({ suggestions, keywords: allKeywords });
   } catch (e) {
     console.error("[suggestions] Fatal error:", e);
     return json({ suggestions: [], keywords: [], error: String(e) });

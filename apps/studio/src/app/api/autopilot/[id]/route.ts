@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { json, notFound, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 /** GET /api/autopilot/[id] — get config details + recent proposals */
 export async function GET(
@@ -7,8 +8,12 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
-    const config = await prisma.autopilotConfig.findUnique({ where: { id } });
+
+    const config = await prisma.autopilotConfig.findFirst({ where: { id, workspaceId: workspace.id } });
     if (!config) return notFound("Config not found");
 
     const proposals = await prisma.autopilotProposal.findMany({
@@ -28,7 +33,14 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
+
+    const owned = await prisma.autopilotConfig.findFirst({ where: { id, workspaceId: workspace.id }, select: { id: true } });
+    if (!owned) return notFound("Config not found");
+
     const body = (await req.json()) as Record<string, unknown>;
 
     const updated = await prisma.autopilotConfig.update({
@@ -48,14 +60,20 @@ export async function PATCH(
   }
 }
 
-/** DELETE /api/autopilot/[id] — delete config and its proposals */
+/** DELETE /api/autopilot/[id] — delete config (proposals cascade via FK) */
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
-    await prisma.autopilotProposal.deleteMany({ where: { autopilotConfigId: id } });
+
+    const owned = await prisma.autopilotConfig.findFirst({ where: { id, workspaceId: workspace.id }, select: { id: true } });
+    if (!owned) return notFound("Config not found");
+
     await prisma.autopilotConfig.delete({ where: { id } });
     return json({ deleted: true });
   } catch (e) {

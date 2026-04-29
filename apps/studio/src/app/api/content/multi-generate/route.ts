@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { callGptJson } from "@/lib/llm";
 import { json, badRequest, serverError } from "@/lib/studio";
 import { z } from "zod";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 const ResultSchema = z.object({
   sns: z.object({
@@ -25,22 +26,27 @@ const ResultSchema = z.object({
  */
 export async function POST(req: Request) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const body = (await req.json()) as { topic?: string; personaId?: string };
     const topic = body.topic?.trim();
     if (!topic) return badRequest("topic is required");
 
-    // Load persona context if specified
     let personaContext = "";
     if (body.personaId) {
-      const persona = await prisma.writingPersona.findUnique({
-        where: { id: body.personaId },
+      const persona = await prisma.writingPersona.findFirst({
+        where: { id: body.personaId, workspaceId: workspace.id },
       });
       if (persona) {
         personaContext = `\n\nWriting Persona: ${persona.name}\nTone: ${JSON.stringify(persona.tone)}\nStyle: ${persona.styleFingerprint}`;
       }
     }
 
-    const prompt = `You are a Korean content creator. Generate content in 3 formats for the topic: "${topic}"
+    const intro = workspace.promptHints?.trim() || "You are a Korean content creator.";
+
+    const prompt = `${intro} Generate content in 3 formats for the topic: "${topic}"
 ${personaContext}
 
 Return JSON:

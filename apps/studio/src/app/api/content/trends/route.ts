@@ -1,5 +1,6 @@
 import { json, serverError } from "@/lib/studio";
 import { getTrendGrowth } from "@/lib/pipeline/topic-intelligence";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 /**
  * GET /api/content/trends — Get trend growth analysis over the past N days.
@@ -9,6 +10,9 @@ import { getTrendGrowth } from "@/lib/pipeline/topic-intelligence";
  */
 export async function GET(req: Request) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+
     const { searchParams } = new URL(req.url);
     const days = Number(searchParams.get("days")) || 7;
 

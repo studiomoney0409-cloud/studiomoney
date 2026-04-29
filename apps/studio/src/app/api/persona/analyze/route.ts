@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { json, badRequest, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 const openai = new OpenAI();
 
@@ -10,12 +11,15 @@ const openai = new OpenAI();
  */
 export async function POST(req: Request) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+
     const body = (await req.json()) as { texts?: string[] };
     if (!body.texts?.length) {
       return badRequest("texts array is required (at least 3 samples recommended)");
     }
 
-    const samples = body.texts.slice(0, 20); // limit to 20 samples
+    const samples = body.texts.slice(0, 20);
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",

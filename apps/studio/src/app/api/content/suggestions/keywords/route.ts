@@ -1,42 +1,40 @@
 import { prisma } from "@/lib/db";
 import { json, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
-const SETTING_KEY = "niche-keywords";
-
-async function loadKeywords(): Promise<string[]> {
-  const row = await prisma.setting.findUnique({ where: { key: SETTING_KEY } });
-  if (!row) return [];
-  const data = row.value as { keywords?: string[] };
-  return data.keywords ?? [];
-}
-
-async function saveKeywords(keywords: string[]): Promise<void> {
-  await prisma.setting.upsert({
-    where: { key: SETTING_KEY },
-    update: { value: { keywords } },
-    create: { key: SETTING_KEY, value: { keywords } },
-  });
-}
-
-/** GET /api/content/suggestions/keywords */
+/**
+ * Workspace-scoped keyword settings.
+ * GET returns the current workspace.keywords array; PUT replaces it.
+ * (Was previously a global Setting key; now stored on the Workspace.)
+ */
 export async function GET() {
   try {
-    const keywords = await loadKeywords();
-    return json({ keywords });
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+    return json({ keywords: workspace.keywords });
   } catch (e) {
     return serverError(String(e));
   }
 }
 
-/** PUT /api/content/suggestions/keywords */
 export async function PUT(req: Request) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const body = (await req.json()) as { keywords?: string[] };
     const keywords = (body.keywords ?? [])
       .map((k) => k.trim())
       .filter(Boolean);
-    await saveKeywords(keywords);
-    return json({ keywords });
+
+    const updated = await prisma.workspace.update({
+      where: { id: workspace.id },
+      data: { keywords },
+      select: { keywords: true },
+    });
+    return json({ keywords: updated.keywords });
   } catch (e) {
     return serverError(String(e));
   }

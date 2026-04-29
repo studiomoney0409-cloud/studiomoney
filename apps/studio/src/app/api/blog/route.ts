@@ -3,11 +3,17 @@ import { json, badRequest, serverError } from "@/lib/studio";
 import { runPipeline, indexArticle, recordTopicPublished, generateVisualAssets } from "@/lib/pipeline";
 import type { PersonaContext } from "@/lib/pipeline";
 import { generateSlug } from "@/lib/blog/writer";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 /** GET /api/blog — list blog posts */
 export async function GET() {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const posts = await prisma.blogPost.findMany({
+      where: { workspaceId: workspace.id },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
@@ -30,6 +36,10 @@ export async function GET() {
 /** POST /api/blog — generate a new blog post via editorial pipeline */
 export async function POST(req: Request) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const body = (await req.json()) as Record<string, unknown>;
     const rawTopic = body.topic as string;
     if (!rawTopic) return badRequest("topic is required");
@@ -43,8 +53,8 @@ export async function POST(req: Request) {
     let persona: PersonaContext | null = null;
 
     if (personaId) {
-      const p = await prisma.writingPersona.findUnique({
-        where: { id: personaId },
+      const p = await prisma.writingPersona.findFirst({
+        where: { id: personaId, workspaceId: workspace.id },
       });
       if (p) {
         persona = {
@@ -66,6 +76,7 @@ export async function POST(req: Request) {
     // Create pipeline run record
     const pipelineRun = await prisma.pipelineRun.create({
       data: {
+        workspaceId: workspace.id,
         topic,
         contentType: (body.contentType as string) ?? "blog",
         personaId: personaId ?? null,
@@ -112,6 +123,7 @@ export async function POST(req: Request) {
 
       const post = await prisma.blogPost.create({
         data: {
+          workspaceId: workspace.id,
           title: result.outline.title,
           slug,
           content,

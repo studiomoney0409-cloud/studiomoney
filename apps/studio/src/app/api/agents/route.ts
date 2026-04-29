@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import type { AgentName } from "@/lib/agents/types";
 import { AGENT_LABELS } from "@/lib/agents/types";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 const AGENT_NAMES: AgentName[] = [
   "chief-editor",
@@ -19,6 +20,11 @@ const AGENT_NAMES: AgentName[] = [
 ];
 
 export async function GET() {
+  const guard = await workspaceGuard();
+  if (!guard.ok) return guard.response;
+  const { workspace } = guard.ctx;
+  const wsId = workspace.id;
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -27,7 +33,7 @@ export async function GET() {
     AGENT_NAMES.map(async (name) => {
       const [lastRun, todayRuns, todayCost] = await Promise.all([
         prisma.agentRun.findFirst({
-          where: { agentName: name },
+          where: { workspaceId: wsId, agentName: name },
           orderBy: { startedAt: "desc" },
           select: {
             id: true,
@@ -41,17 +47,16 @@ export async function GET() {
           },
         }),
         prisma.agentRun.count({
-          where: { agentName: name, startedAt: { gte: today } },
+          where: { workspaceId: wsId, agentName: name, startedAt: { gte: today } },
         }),
         prisma.agentRun.aggregate({
-          where: { agentName: name, startedAt: { gte: today } },
+          where: { workspaceId: wsId, agentName: name, startedAt: { gte: today } },
           _sum: { costUsd: true },
         }),
       ]);
 
-      // Determine current status
       const runningNow = await prisma.agentRun.count({
-        where: { agentName: name, status: "running" },
+        where: { workspaceId: wsId, agentName: name, status: "running" },
       });
 
       let status: "running" | "idle" | "error" = "idle";
@@ -82,7 +87,7 @@ export async function GET() {
 
   // 2. Recent activity timeline (today)
   const recentRuns = await prisma.agentRun.findMany({
-    where: { startedAt: { gte: today } },
+    where: { workspaceId: wsId, startedAt: { gte: today } },
     orderBy: { startedAt: "desc" },
     take: 30,
     select: {
@@ -100,7 +105,7 @@ export async function GET() {
 
   // 3. Weekly plan progress
   const weeklyPlan = await prisma.weeklyPlan.findFirst({
-    where: { weekStart: { lte: today }, weekEnd: { gte: today } },
+    where: { workspaceId: wsId, weekStart: { lte: today }, weekEnd: { gte: today } },
     orderBy: { createdAt: "desc" },
     include: { briefings: true },
   });
@@ -122,11 +127,12 @@ export async function GET() {
     };
   }
 
-  // 4. Alerts — recent errors and warnings
+  // 4. Alerts — recent errors and warnings (filtered to this workspace's runs)
   const alerts = await prisma.agentLog.findMany({
     where: {
       level: { in: ["error", "warn"] },
       createdAt: { gte: today },
+      run: { workspaceId: wsId },
     },
     orderBy: { createdAt: "desc" },
     take: 20,
@@ -138,15 +144,15 @@ export async function GET() {
   // 5. Cost summary
   const [dailyCost, weeklyCost, monthlyCost] = await Promise.all([
     prisma.agentRun.aggregate({
-      where: { startedAt: { gte: today } },
+      where: { workspaceId: wsId, startedAt: { gte: today } },
       _sum: { costUsd: true },
     }),
     prisma.agentRun.aggregate({
-      where: { startedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
+      where: { workspaceId: wsId, startedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
       _sum: { costUsd: true },
     }),
     prisma.agentRun.aggregate({
-      where: { startedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
+      where: { workspaceId: wsId, startedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
       _sum: { costUsd: true },
     }),
   ]);

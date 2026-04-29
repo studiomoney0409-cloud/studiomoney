@@ -1,15 +1,21 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ agentName: string }> },
 ) {
+  const guard = await workspaceGuard();
+  if (!guard.ok) return guard.response;
+  const { workspace } = guard.ctx;
+  const wsId = workspace.id;
+
   const { agentName } = await params;
 
-  // Recent runs for this agent
+  // Recent runs for this agent in this workspace
   const runs = await prisma.agentRun.findMany({
-    where: { agentName },
+    where: { workspaceId: wsId, agentName },
     orderBy: { startedAt: "desc" },
     take: 50,
     select: {
@@ -50,21 +56,21 @@ export async function GET(
 
   const [todayCount, weekCount, weekCost, totalRuns] = await Promise.all([
     prisma.agentRun.count({
-      where: { agentName, startedAt: { gte: today } },
+      where: { workspaceId: wsId, agentName, startedAt: { gte: today } },
     }),
     prisma.agentRun.count({
-      where: { agentName, startedAt: { gte: weekAgo } },
+      where: { workspaceId: wsId, agentName, startedAt: { gte: weekAgo } },
     }),
     prisma.agentRun.aggregate({
-      where: { agentName, startedAt: { gte: weekAgo } },
+      where: { workspaceId: wsId, agentName, startedAt: { gte: weekAgo } },
       _sum: { costUsd: true },
       _avg: { durationMs: true },
     }),
-    prisma.agentRun.count({ where: { agentName } }),
+    prisma.agentRun.count({ where: { workspaceId: wsId, agentName } }),
   ]);
 
   const failedThisWeek = await prisma.agentRun.count({
-    where: { agentName, status: "failed", startedAt: { gte: weekAgo } },
+    where: { workspaceId: wsId, agentName, status: "failed", startedAt: { gte: weekAgo } },
   });
 
   return NextResponse.json({

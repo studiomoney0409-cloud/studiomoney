@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { json, notFound, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 /** GET /api/blog/[id] — get full blog post */
 export async function GET(
@@ -7,9 +8,12 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
-    const post = await prisma.blogPost.findUnique({
-      where: { id },
+    const post = await prisma.blogPost.findFirst({
+      where: { id, workspaceId: workspace.id },
       include: { pipelineRun: true },
     });
     if (!post) return notFound("Blog post not found");
@@ -25,7 +29,12 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
+    const owned = await prisma.blogPost.findFirst({ where: { id, workspaceId: workspace.id }, select: { id: true } });
+    if (!owned) return notFound("Blog post not found");
     const body = (await req.json()) as Record<string, unknown>;
 
     const data: Record<string, unknown> = {};
@@ -58,7 +67,12 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
+    const owned = await prisma.blogPost.findFirst({ where: { id, workspaceId: workspace.id }, select: { id: true } });
+    if (!owned) return notFound("Blog post not found");
     await prisma.blogPost.delete({ where: { id } });
     return json({ deleted: true });
   } catch (e) {

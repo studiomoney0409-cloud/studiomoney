@@ -1,13 +1,16 @@
 import { prisma } from "@/lib/db";
 import { json, badRequest, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type JsonInput = any;
-
-/** GET /api/autopilot — list all autopilot configs */
+/** GET /api/autopilot — list autopilot configs in this workspace */
 export async function GET() {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const configs = await prisma.autopilotConfig.findMany({
+      where: { workspaceId: workspace.id },
       orderBy: { createdAt: "desc" },
     });
     return json(configs);
@@ -19,12 +22,24 @@ export async function GET() {
 /** POST /api/autopilot — create a new autopilot config */
 export async function POST(req: Request) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const body = (await req.json()) as Record<string, unknown>;
     const snsAccountId = body.snsAccountId as string;
     if (!snsAccountId) return badRequest("snsAccountId is required");
 
+    // Verify the SNS account belongs to this workspace
+    const account = await prisma.snsAccount.findFirst({
+      where: { id: snsAccountId, workspaceId: workspace.id },
+      select: { id: true },
+    });
+    if (!account) return badRequest("snsAccount not in this workspace");
+
     const config = await prisma.autopilotConfig.create({
       data: {
+        workspaceId: workspace.id,
         snsAccountId,
         personaId: (body.personaId as string) ?? null,
         platforms: (body.platforms as string[]) ?? [],

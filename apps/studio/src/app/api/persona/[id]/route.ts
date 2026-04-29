@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { json, notFound, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 /** GET /api/persona/:id */
 export async function GET(
@@ -7,8 +8,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
-    const persona = await prisma.writingPersona.findUnique({ where: { id } });
+    const persona = await prisma.writingPersona.findFirst({ where: { id, workspaceId: workspace.id } });
     if (!persona) return notFound("Persona not found");
     return json(persona);
   } catch (e) {
@@ -22,10 +26,13 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
     const body = (await req.json()) as Record<string, unknown>;
 
-    const existing = await prisma.writingPersona.findUnique({ where: { id } });
+    const existing = await prisma.writingPersona.findFirst({ where: { id, workspaceId: workspace.id } });
     if (!existing) return notFound("Persona not found");
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -56,8 +63,11 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
-    const existing = await prisma.writingPersona.findUnique({ where: { id } });
+    const existing = await prisma.writingPersona.findFirst({ where: { id, workspaceId: workspace.id } });
     if (!existing) return notFound("Persona not found");
     await prisma.writingPersona.delete({ where: { id } });
     return json({ ok: true });

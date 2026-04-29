@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { json, badRequest, notFound, serverError } from "@/lib/studio";
 import { enqueueJob } from "@/lib/jobs";
 import { adjustScheduleTime } from "@/lib/autopilot/scheduler";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 /**
  * POST /api/publish/schedule — schedule a publication for a future time.
@@ -9,6 +10,10 @@ import { adjustScheduleTime } from "@/lib/autopilot/scheduler";
  */
 export async function POST(req: Request) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const body = (await req.json()) as Record<string, unknown>;
     const scheduledAt = body.scheduledAt as string;
 
@@ -21,24 +26,26 @@ export async function POST(req: Request) {
     let pubId: string;
 
     if (body.publicationId) {
-      // Schedule existing draft
       pubId = body.publicationId as string;
-      const pub = await prisma.publication.findUnique({ where: { id: pubId } });
+      const pub = await prisma.publication.findFirst({ where: { id: pubId, workspaceId: workspace.id } });
       if (!pub) return notFound("Publication not found");
       if (pub.status !== "draft") {
         return badRequest("Only draft publications can be scheduled");
       }
     } else {
-      // Create + schedule in one step
       const snsAccountId = body.snsAccountId as string;
       const platform = body.platform as string;
       const content = body.content as Record<string, unknown>;
       if (!snsAccountId || !platform || !content?.text) {
         return badRequest("snsAccountId, platform, and content.text are required");
       }
+      const account = await prisma.snsAccount.findFirst({ where: { id: snsAccountId, workspaceId: workspace.id }, select: { id: true } });
+      if (!account) return badRequest("SNS account not in this workspace");
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const pub = await prisma.publication.create({
         data: {
+          workspaceId: workspace.id,
           snsAccountId,
           platform,
           content: content as any,
@@ -49,20 +56,17 @@ export async function POST(req: Request) {
       pubId = pub.id;
     }
 
-    // Adjust schedule time to avoid collisions with existing posts
     const accountId = body.snsAccountId as string ??
       (await prisma.publication.findUnique({ where: { id: pubId }, select: { snsAccountId: true } }))?.snsAccountId;
     const adjustedDate = accountId
       ? await adjustScheduleTime(accountId, schedDate)
       : schedDate;
 
-    // Update to scheduled
     await prisma.publication.update({
       where: { id: pubId },
       data: { status: "scheduled", scheduledAt: adjustedDate },
     });
 
-    // Enqueue job
     await enqueueJob({
       type: "publish",
       payload: { publicationId: pubId },

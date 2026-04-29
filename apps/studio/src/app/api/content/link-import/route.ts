@@ -1,11 +1,17 @@
 import { prisma } from "@/lib/db";
 import { json, badRequest, serverError } from "@/lib/studio";
 import { extractFromUrls } from "@/lib/sns/linkExtractor";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
-/** GET /api/content/link-import — list all link imports */
+/** GET /api/content/link-import — list link imports in this workspace */
 export async function GET() {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const imports = await prisma.linkImport.findMany({
+      where: { workspaceId: workspace.id },
       orderBy: { createdAt: "desc" },
       take: 50,
     });
@@ -21,6 +27,10 @@ export async function GET() {
  */
 export async function POST(req: Request) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const body = (await req.json()) as {
       urls?: string[];
       commonInstructions?: string;
@@ -30,7 +40,6 @@ export async function POST(req: Request) {
       return badRequest("urls array is required and must not be empty");
     }
 
-    // Validate URLs
     const validUrls: string[] = [];
     for (const u of body.urls) {
       try {
@@ -42,19 +51,17 @@ export async function POST(req: Request) {
     }
     if (!validUrls.length) return badRequest("No valid URLs provided");
 
-    // Create import record
     const record = await prisma.linkImport.create({
       data: {
+        workspaceId: workspace.id,
         urls: validUrls,
         commonInstructions: body.commonInstructions ?? "",
         status: "processing",
       },
     });
 
-    // Extract content (runs inline — fast enough for <20 URLs)
     const results = await extractFromUrls(validUrls);
 
-    // Update with results
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updated = await prisma.linkImport.update({
       where: { id: record.id },

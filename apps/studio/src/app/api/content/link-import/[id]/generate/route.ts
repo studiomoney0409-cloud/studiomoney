@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { prisma } from "@/lib/db";
 import { json, notFound, badRequest, serverError } from "@/lib/studio";
 import type { ExtractedContent } from "@/lib/sns/linkExtractor";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 const openai = new OpenAI();
 
@@ -15,14 +16,20 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
+
     const body = (await req.json()) as {
       urlIndex?: number;
       platform?: string;
       personaFingerprint?: string;
     };
 
-    const record = await prisma.linkImport.findUnique({ where: { id } });
+    const record = await prisma.linkImport.findFirst({
+      where: { id, workspaceId: workspace.id },
+    });
     if (!record) return notFound("Link import not found");
     if (record.status !== "completed" || !record.results) {
       return badRequest("Import not yet completed or has no results");
@@ -31,7 +38,6 @@ export async function POST(
     const results = record.results as unknown as ExtractedContent[];
     const platform = body.platform ?? "threads";
 
-    // Generate for specific URL or all
     const single = body.urlIndex !== undefined ? results[body.urlIndex] : undefined;
     const targets: ExtractedContent[] =
       body.urlIndex !== undefined

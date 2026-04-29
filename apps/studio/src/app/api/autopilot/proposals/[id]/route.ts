@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { json, badRequest, notFound, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 /**
  * Find the next optimal posting time for an account.
@@ -72,6 +73,10 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const { id } = await params;
     const body = (await req.json()) as { status?: string; scheduledAt?: string };
 
@@ -79,17 +84,18 @@ export async function PATCH(
       return badRequest("status must be 'approved' or 'rejected'");
     }
 
-    const proposal = await prisma.autopilotProposal.findUnique({ where: { id } });
+    // Workspace ownership check via parent config
+    const proposal = await prisma.autopilotProposal.findFirst({
+      where: { id, config: { workspaceId: workspace.id } },
+    });
     if (!proposal) return notFound("Proposal not found");
 
     let scheduledAt: Date | null = null;
 
     if (body.status === "approved") {
       if (body.scheduledAt) {
-        // Manual override
         scheduledAt = new Date(body.scheduledAt);
       } else {
-        // Auto-select optimal time
         const config = await prisma.autopilotConfig.findUnique({
           where: { id: proposal.autopilotConfigId },
         });
