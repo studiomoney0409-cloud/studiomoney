@@ -73,6 +73,7 @@ export const performanceCollectHandler: JobHandler = {
 
     await prisma.postPerformance.create({
       data: {
+        workspaceId: pub.workspaceId,
         publicationId: pub.id,
         snsAccountId: pub.snsAccountId,
         platform: pub.platform,

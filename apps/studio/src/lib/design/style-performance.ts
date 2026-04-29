@@ -19,6 +19,8 @@ import type {
 
 export interface StylePerformanceRecord {
   id: string;
+  /** Workspace owning this record. Optional for legacy callers; resolved to default workspace. */
+  workspaceId?: string;
   createdAt: number;
 
   // Design metadata
@@ -103,26 +105,32 @@ export function recordDesignStyle(record: StylePerformanceRecord): void {
   // Persist to DB (fire-and-forget)
   const p = db();
   if (p) {
-    void p.stylePerformanceEntry.upsert({
-      where: { id: record.id },
-      create: {
-        id: record.id,
-        contentType: record.contentType,
-        format: record.format,
-        platform: record.platform,
-        templateId: record.templateId,
-        designPath: record.designPath,
-        typographyMood: record.typographyMood,
-        layoutStyle: record.layoutStyle,
-        colorMood: record.colorMood,
-        primaryColor: record.primaryColor,
-        accentColor: record.accentColor,
-        hasImage: record.hasImage,
-        slideCount: record.slideCount,
-        createdAt: new Date(record.createdAt),
-      },
-      update: {},
-    }).catch(() => {});
+    void (async () => {
+      const { fallbackWorkspaceId } = await import("@/lib/auth/workspace-fallback");
+      const workspaceId = record.workspaceId ?? (await fallbackWorkspaceId());
+      if (!workspaceId) return;
+      await p.stylePerformanceEntry.upsert({
+        where: { id: record.id },
+        create: {
+          id: record.id,
+          workspaceId,
+          contentType: record.contentType,
+          format: record.format,
+          platform: record.platform,
+          templateId: record.templateId,
+          designPath: record.designPath,
+          typographyMood: record.typographyMood,
+          layoutStyle: record.layoutStyle,
+          colorMood: record.colorMood,
+          primaryColor: record.primaryColor,
+          accentColor: record.accentColor,
+          hasImage: record.hasImage,
+          slideCount: record.slideCount,
+          createdAt: new Date(record.createdAt),
+        },
+        update: {},
+      });
+    })().catch(() => {});
   }
 }
 

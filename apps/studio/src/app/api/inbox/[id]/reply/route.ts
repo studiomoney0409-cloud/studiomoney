@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { json, serverError } from "@/lib/studio";
 import { getValidToken } from "@/lib/sns/tokenManager";
 import { getCommentAdapter } from "@/lib/sns/comments";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 /**
  * POST /api/inbox/[id]/reply
@@ -14,24 +15,22 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
+
     const body = (await req.json()) as { text?: string };
     const text = body.text?.trim();
-    if (!text) {
-      return json({ error: "text is required" }, 400);
-    }
+    if (!text) return json({ error: "text is required" }, 400);
 
-    const msg = await prisma.incomingMessage.findUnique({ where: { id } });
-    if (!msg) {
-      return json({ error: "Message not found" }, 404);
-    }
+    const msg = await prisma.incomingMessage.findFirst({ where: { id, workspaceId: workspace.id } });
+    if (!msg) return json({ error: "Message not found" }, 404);
 
-    const account = await prisma.snsAccount.findUnique({
-      where: { id: msg.snsAccountId },
+    const account = await prisma.snsAccount.findFirst({
+      where: { id: msg.snsAccountId, workspaceId: workspace.id },
     });
-    if (!account) {
-      return json({ error: "SNS account not found" }, 404);
-    }
+    if (!account) return json({ error: "SNS account not found" }, 404);
 
     const accessToken = await getValidToken(account.id);
     const adapter = getCommentAdapter(account.platform);

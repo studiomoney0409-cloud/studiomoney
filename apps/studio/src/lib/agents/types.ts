@@ -39,6 +39,8 @@ export const AGENT_LABELS: Record<AgentName, string> = {
 export interface AgentContext {
   runId: string;
   agentName: AgentName;
+  /** Workspace owning this run — required for prisma.create on workspace-scoped tables */
+  workspaceId: string;
   prisma: PrismaClient;
   /** Write a log entry to AgentLog */
   log: (level: "debug" | "info" | "warn" | "error", message: string, metadata?: Record<string, unknown>) => Promise<void>;

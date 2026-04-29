@@ -52,6 +52,7 @@ export async function runContentProduction(
   // 2. Create PipelineRun record to track this production
   const pipelineRun = await ctx.prisma.pipelineRun.create({
     data: {
+      workspaceId: ctx.workspaceId,
       topic: assignment.topic,
       angle: assignment.angle,
       contentType: assignment.contentType,
@@ -128,6 +129,7 @@ export async function runContentProduction(
 
     const blogPost = await ctx.prisma.blogPost.create({
       data: {
+        workspaceId: ctx.workspaceId,
         title: e2eResult.article.outline?.title ?? assignment.topic,
         slug,
         content: finalContent,
@@ -236,6 +238,7 @@ ${assignment.platforms.join(", ")}
         const smartTime = await getSmartScheduleTime(account.id).catch(() => null);
         const pub = await ctx.prisma.publication.create({
           data: {
+            workspaceId: ctx.workspaceId,
             snsAccountId: account.id,
             platform: variant.platform,
             content: { text: variant.text, hashtags: variant.hashtags },
@@ -258,7 +261,7 @@ ${assignment.platforms.join(", ")}
   const todayDate = new Date();
   todayDate.setHours(0, 0, 0, 0);
   const briefing = await ctx.prisma.dailyBriefing.findUnique({
-    where: { date: todayDate },
+    where: { workspaceId_date: { workspaceId: ctx.workspaceId, date: todayDate } },
   });
   if (briefing) {
     const statusJson = (briefing.statusJson as Record<string, string>) ?? {};

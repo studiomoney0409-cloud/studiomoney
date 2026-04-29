@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { json, notFound, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 interface Ctx {
   params: Promise<{ id: string }>;
@@ -7,8 +8,11 @@ interface Ctx {
 
 export async function GET(_req: Request, ctx: Ctx) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await ctx.params;
-    const project = await prisma.designProject.findUnique({ where: { id } });
+    const project = await prisma.designProject.findFirst({ where: { id, workspaceId: workspace.id } });
     if (!project) return notFound("프로젝트를 찾을 수 없습니다");
     return json(project);
   } catch (e) {
@@ -18,9 +22,15 @@ export async function GET(_req: Request, ctx: Ctx) {
 
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await ctx.params;
-    const body = (await req.json()) as Record<string, unknown>;
 
+    const owned = await prisma.designProject.findFirst({ where: { id, workspaceId: workspace.id }, select: { id: true } });
+    if (!owned) return notFound("프로젝트를 찾을 수 없습니다");
+
+    const body = (await req.json()) as Record<string, unknown>;
     const data: Record<string, unknown> = {};
     if (body.title !== undefined) data.title = String(body.title);
     if (body.status !== undefined) data.status = String(body.status);
@@ -40,7 +50,14 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
 export async function DELETE(_req: Request, ctx: Ctx) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await ctx.params;
+
+    const owned = await prisma.designProject.findFirst({ where: { id, workspaceId: workspace.id }, select: { id: true } });
+    if (!owned) return notFound("프로젝트를 찾을 수 없습니다");
+
     await prisma.designProject.delete({ where: { id } });
     return json({ ok: true });
   } catch (e) {

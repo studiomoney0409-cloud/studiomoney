@@ -71,30 +71,36 @@ export function saveQualityRecord(record: DesignQualityRecord): void {
   // Persist to DB (fire-and-forget)
   const p = db();
   if (p) {
-    void p.designQualityEntry.upsert({
-      where: { designId: record.designId },
-      create: {
-        designId: record.designId,
-        contentType: record.contentType,
-        format: record.format,
-        platform: record.platform,
-        scoresJson: JSON.parse(JSON.stringify(record.scores)),
-        averageScore: record.averageScore,
-        verdict: record.verdict,
-        iterationCount: record.iterationCount,
-        designPath: record.designPath,
-        generationTimeMs: record.generationTimeMs,
-        costUsd: record.costUsd,
-      },
-      update: {
-        scoresJson: JSON.parse(JSON.stringify(record.scores)),
-        averageScore: record.averageScore,
-        verdict: record.verdict,
-        iterationCount: record.iterationCount,
-        generationTimeMs: record.generationTimeMs,
-        costUsd: record.costUsd,
-      },
-    }).catch((err) => {
+    void (async () => {
+      const { fallbackWorkspaceId } = await import("@/lib/auth/workspace-fallback");
+      const workspaceId = record.workspaceId ?? (await fallbackWorkspaceId());
+      if (!workspaceId) return; // no workspace exists yet — skip persistence
+      await p.designQualityEntry.upsert({
+        where: { designId: record.designId },
+        create: {
+          workspaceId,
+          designId: record.designId,
+          contentType: record.contentType,
+          format: record.format,
+          platform: record.platform,
+          scoresJson: JSON.parse(JSON.stringify(record.scores)),
+          averageScore: record.averageScore,
+          verdict: record.verdict,
+          iterationCount: record.iterationCount,
+          designPath: record.designPath,
+          generationTimeMs: record.generationTimeMs,
+          costUsd: record.costUsd,
+        },
+        update: {
+          scoresJson: JSON.parse(JSON.stringify(record.scores)),
+          averageScore: record.averageScore,
+          verdict: record.verdict,
+          iterationCount: record.iterationCount,
+          generationTimeMs: record.generationTimeMs,
+          costUsd: record.costUsd,
+        },
+      });
+    })().catch((err) => {
       console.warn("[quality-store] DB write failed:", (err as Error).message);
     });
   }

@@ -18,10 +18,23 @@ interface RunAgentOpts {
   triggerType?: "cron" | "event" | "manual";
   triggerRef?: string;
   input?: Record<string, unknown>;
+  /** Workspace owning this run. Required for multi-tenant operation. When omitted (legacy callers),
+   *  the runner falls back to the first workspace it can find — useful for single-tenant deploys. */
+  workspaceId?: string;
   /** Max execution time in ms (default: 120_000 = 2 min) */
   timeoutMs?: number;
   /** Max retries with exponential backoff (default: 0 = no retry) */
   maxRetries?: number;
+}
+
+/** Resolve a workspace id when the caller did not provide one. Returns the oldest workspace
+ *  in the system. Returns null if no workspace exists yet (caller should treat as failure). */
+async function resolveFallbackWorkspaceId(): Promise<string | null> {
+  const ws = await prisma.workspace.findFirst({
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+    select: { id: true },
+  });
+  return ws?.id ?? null;
 }
 
 const DEFAULT_TIMEOUT_MS = 240_000; // 4 minutes (must stay under Vercel 300s maxDuration)
@@ -49,9 +62,22 @@ export async function runAgent<T>(
   const plog = createLogger({ agent: agentName });
   const startedAt = new Date();
 
+  // 0. Resolve workspaceId (explicit or fallback to oldest workspace)
+  const workspaceId = opts.workspaceId ?? (await resolveFallbackWorkspaceId());
+  if (!workspaceId) {
+    return {
+      success: false,
+      error: "No workspace exists — create a workspace before running agents",
+      costUsd: 0,
+      durationMs: 0,
+      runId: "",
+    };
+  }
+
   // 1. Create run record
   const run = await prisma.agentRun.create({
     data: {
+      workspaceId,
       agentName,
       triggerType: opts.triggerType ?? "cron",
       triggerRef: opts.triggerRef ?? "",
@@ -66,6 +92,7 @@ export async function runAgent<T>(
   const ctx: AgentContext = {
     runId: run.id,
     agentName,
+    workspaceId,
     prisma,
     log: async (level, message, metadata) => {
       plog[level]({ runId: run.id, ...metadata }, message);

@@ -99,6 +99,7 @@ export async function searchCandidateImages(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const gate = await ctx.prisma.imageGate.create({
     data: {
+      workspaceId: ctx.workspaceId,
       agentRunId: ctx.runId,
       topic: opts.topic,
       articleSummary: opts.articleSummary.slice(0, 500),

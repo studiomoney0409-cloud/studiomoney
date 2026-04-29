@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
-import { json, serverError } from "@/lib/studio";
+import { json, notFound, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 /** PATCH /api/inbox/rules/[id] — toggle or update rule */
 export async function PATCH(
@@ -7,7 +8,14 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
+
+    const owned = await prisma.autoReplyRule.findFirst({ where: { id, workspaceId: workspace.id }, select: { id: true } });
+    if (!owned) return notFound("Rule not found");
+
     const body = (await req.json()) as Record<string, unknown>;
     const updated = await prisma.autoReplyRule.update({
       where: { id },
@@ -31,7 +39,14 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
+
+    const owned = await prisma.autoReplyRule.findFirst({ where: { id, workspaceId: workspace.id }, select: { id: true } });
+    if (!owned) return notFound("Rule not found");
+
     await prisma.autoReplyRule.delete({ where: { id } });
     return json({ deleted: true });
   } catch (e) {

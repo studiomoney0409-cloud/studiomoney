@@ -63,6 +63,7 @@ export const onboardAnalyzeHandler: JobHandler = {
       // Not enough data, create a basic default persona instead
       await prisma.writingPersona.create({
         data: {
+          workspaceId: account.workspaceId,
           name: `${account.displayName} 스타일`,
           creationMethod: "analyze",
           tone: { formality: 3, humor: 2, emotion: 3, energy: 3 } as JsonInput,
@@ -99,6 +100,7 @@ JSON만 반환하세요.`;
 
     await prisma.writingPersona.create({
       data: {
+        workspaceId: account.workspaceId,
         name: result.name,
         creationMethod: "analyze",
         tone: result.tone as JsonInput,

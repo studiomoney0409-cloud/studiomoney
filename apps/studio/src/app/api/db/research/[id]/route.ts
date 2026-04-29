@@ -1,11 +1,14 @@
 import { prisma } from "@/lib/db";
 import { json, notFound, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
     const { id } = await params;
     const report = await prisma.benchmarkReport.findUnique({ where: { id } });
     if (!report) return notFound("Report not found");
@@ -20,6 +23,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
     const { id } = await params;
     await prisma.benchmarkReport.delete({ where: { id } });
     return json({ ok: true });

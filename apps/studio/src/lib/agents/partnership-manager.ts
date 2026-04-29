@@ -217,6 +217,7 @@ export async function runOpportunityScan(
 
     await ctx.prisma.outreachCampaign.create({
       data: {
+        workspaceId: ctx.workspaceId,
         targetName: opp.entityName,
         targetType: opp.entityType,
         status: "draft",

@@ -6,8 +6,9 @@ import { cacheGetJSON, cacheSetJSON } from "@/lib/redis";
 
 const RESEARCH_CACHE_TTL_SEC = 24 * 60 * 60; // 24 hours
 
-function researchCacheKey(topic: string): string {
-  return `research:${topic.toLowerCase().trim()}`;
+function researchCacheKey(topic: string, workspaceId?: string): string {
+  const scope = workspaceId ?? "global";
+  return `research:${scope}:${topic.toLowerCase().trim()}`;
 }
 
 /**
@@ -19,10 +20,11 @@ export async function gatherResearch(
   opts?: {
     persona?: PersonaContext | null;
     contentType?: string;
+    workspaceId?: string;
   },
 ): Promise<ResearchPacket> {
-  // Check Redis cache first (same topic within 24h)
-  const cacheKey = researchCacheKey(topic);
+  // Check Redis cache first (same topic within 24h, scoped per workspace when provided)
+  const cacheKey = researchCacheKey(topic, opts?.workspaceId);
   const cached = await cacheGetJSON<ResearchPacket>(cacheKey);
   if (cached) return cached;
 

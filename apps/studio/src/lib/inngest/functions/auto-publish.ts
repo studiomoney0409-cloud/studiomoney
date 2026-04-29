@@ -76,13 +76,14 @@ export const autoPublishAfterDesign = inngest.createFunction(
       const newPubId = await step.run(`create-pub-${asset.platform}`, async () => {
         const account = await prisma.snsAccount.findFirst({
           where: { platform: asset.platform },
-          select: { id: true },
+          select: { id: true, workspaceId: true },
         });
         if (!account) return null;
 
         const smartTime = await getSmartScheduleTime(account.id).catch(() => null);
         const pub = await prisma.publication.create({
           data: {
+            workspaceId: account.workspaceId,
             snsAccountId: account.id,
             platform: asset.platform,
             content: {

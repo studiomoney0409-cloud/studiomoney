@@ -128,10 +128,15 @@ async function persistTrendSnapshots(items: TrendLike[]): Promise<void> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  const { fallbackWorkspaceId } = await import("@/lib/auth/workspace-fallback");
+  const workspaceId = await fallbackWorkspaceId();
+  if (!workspaceId) return;
+
   for (const item of items) {
     try {
       await prisma.trendSnapshot.create({
         data: {
+          workspaceId,
           source: item.source,
           title: item.title,
           url: item.url ?? "",
@@ -472,9 +477,14 @@ export async function recordTopicPublished(
   const coolingUntil = new Date();
   coolingUntil.setDate(coolingUntil.getDate() + coolingDays);
 
+  const { fallbackWorkspaceId } = await import("@/lib/auth/workspace-fallback");
+  const workspaceId = await fallbackWorkspaceId();
+  if (!workspaceId) return;
+
   await prisma.topicPerformance.upsert({
-    where: { topic_category: { topic, category } },
+    where: { workspaceId_topic_category: { workspaceId, topic, category } },
     create: {
+      workspaceId,
       topic,
       category,
       articleCount: 1,

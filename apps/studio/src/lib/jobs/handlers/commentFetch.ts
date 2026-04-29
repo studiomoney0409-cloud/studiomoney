@@ -49,6 +49,7 @@ export const commentFetchHandler: JobHandler = {
 
       // Collect all comments from all posts, then batch insert
       const allComments: Array<{
+        workspaceId: string;
         snsAccountId: string;
         platform: string;
         externalId: string;
@@ -70,6 +71,7 @@ export const commentFetchHandler: JobHandler = {
           fetched += comments.length;
           for (const comment of comments) {
             allComments.push({
+              workspaceId: account.workspaceId,
               snsAccountId: account.id,
               platform: account.platform,
               externalId: comment.externalId,

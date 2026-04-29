@@ -108,6 +108,7 @@ export async function runCommunityManagement(ctx: AgentContext): Promise<Communi
       // Create TopicDraft for repeated questions
       await ctx.prisma.topicDraft.create({
         data: {
+          workspaceId: ctx.workspaceId,
           topic: `팔로워 질문: ${commonWords.join(", ")}`,
           angle: "팔로워가 자주 묻는 질문에 대한 답변형 콘텐츠",
           contentType: "sns",

@@ -20,8 +20,8 @@ function isPermanentError(e: unknown): boolean {
   );
 }
 
-/** Save (or update) an SNS account after OAuth callback. Tokens are encrypted at rest. */
-export async function saveAccount(result: OAuthTokenResult, platform: string) {
+/** Save (or update) an SNS account in a workspace after OAuth callback. Tokens are encrypted at rest. */
+export async function saveAccount(result: OAuthTokenResult, platform: string, workspaceId: string) {
   const data = {
     displayName: result.displayName,
     profileImageUrl: result.profileImageUrl ?? "",
@@ -37,12 +37,14 @@ export async function saveAccount(result: OAuthTokenResult, platform: string) {
 
   return prisma.snsAccount.upsert({
     where: {
-      platform_platformUserId: {
+      workspaceId_platform_platformUserId: {
+        workspaceId,
         platform,
         platformUserId: result.platformUserId,
       },
     },
     create: {
+      workspaceId,
       platform,
       platformUserId: result.platformUserId,
       ...data,

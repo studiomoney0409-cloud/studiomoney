@@ -66,9 +66,10 @@ export async function POST(req: Request) {
         body.object === "instagram" ? "instagram" : "threads";
       const account = await prisma.snsAccount.findFirst({
         where: { platformUserId: entry.id, platform, isActive: true },
-        select: { id: true },
+        select: { id: true, workspaceId: true },
       });
       const snsAccountId = account?.id ?? null;
+      const workspaceId = account?.workspaceId ?? null;
 
       // Comment/reply changes
       for (const change of entry.changes ?? []) {
@@ -80,7 +81,7 @@ export async function POST(req: Request) {
         });
 
         // Parse comment payloads into IncomingMessage
-        if (change.field === "comments" && snsAccountId) {
+        if (change.field === "comments" && snsAccountId && workspaceId) {
           const v = change.value as {
             id?: string;
             text?: string;
@@ -90,6 +91,7 @@ export async function POST(req: Request) {
           };
           if (v.id) {
             incomingMessages.push({
+              workspaceId,
               snsAccountId,
               platform,
               externalId: v.id,
@@ -116,7 +118,7 @@ export async function POST(req: Request) {
         });
 
         // Parse DM into IncomingMessage
-        if (snsAccountId) {
+        if (snsAccountId && workspaceId) {
           const m = msg as {
             message?: { mid?: string; text?: string };
             sender?: { id?: string };
@@ -124,6 +126,7 @@ export async function POST(req: Request) {
           };
           if (m.message?.mid) {
             incomingMessages.push({
+              workspaceId,
               snsAccountId,
               platform: "instagram",
               externalId: m.message.mid,

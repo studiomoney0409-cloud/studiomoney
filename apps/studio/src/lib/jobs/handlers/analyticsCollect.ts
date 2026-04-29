@@ -96,6 +96,7 @@ export const analyticsCollectHandler: JobHandler = {
 
       await prisma.analyticsSnapshot.create({
         data: {
+          workspaceId: account.workspaceId,
           snsAccountId: account.id,
           platform: account.platform,
           date: today,

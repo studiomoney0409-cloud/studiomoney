@@ -82,12 +82,16 @@ export async function analyzeTopicPerformance(): Promise<{
       trend,
     });
 
-    // Update TopicPerformance table
-    await prisma.topicPerformance.upsert({
-      where: { topic_category: { topic: category, category } },
-      create: { topic: category, category, articleCount: data.engagement.length, avgEngagement: avg },
-      update: { articleCount: data.engagement.length, avgEngagement: avg },
-    });
+    // Update TopicPerformance table (per workspace, derived from this run's workspace if available)
+    const { fallbackWorkspaceId } = await import("@/lib/auth/workspace-fallback");
+    const workspaceId = await fallbackWorkspaceId();
+    if (workspaceId) {
+      await prisma.topicPerformance.upsert({
+        where: { workspaceId_topic_category: { workspaceId, topic: category, category } },
+        create: { workspaceId, topic: category, category, articleCount: data.engagement.length, avgEngagement: avg },
+        update: { articleCount: data.engagement.length, avgEngagement: avg },
+      });
+    }
   }
 
   return {

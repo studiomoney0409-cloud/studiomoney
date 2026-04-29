@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { json, notFound, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 /** GET /api/campaigns/[id] — get campaign + logs */
 export async function GET(
@@ -7,8 +8,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
-    const campaign = await prisma.keywordCampaign.findUnique({ where: { id } });
+    const campaign = await prisma.keywordCampaign.findFirst({ where: { id, workspaceId: workspace.id } });
     if (!campaign) return notFound("Campaign not found");
 
     const logs = await prisma.keywordCommentLog.findMany({
@@ -28,9 +32,15 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
-    const body = (await req.json()) as Record<string, unknown>;
 
+    const owned = await prisma.keywordCampaign.findFirst({ where: { id, workspaceId: workspace.id }, select: { id: true } });
+    if (!owned) return notFound("Campaign not found");
+
+    const body = (await req.json()) as Record<string, unknown>;
     const updated = await prisma.keywordCampaign.update({
       where: { id },
       data: {
@@ -48,14 +58,20 @@ export async function PATCH(
   }
 }
 
-/** DELETE /api/campaigns/[id] */
+/** DELETE /api/campaigns/[id] — campaign delete cascades to logs via FK */
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id } = await params;
-    await prisma.keywordCommentLog.deleteMany({ where: { campaignId: id } });
+
+    const owned = await prisma.keywordCampaign.findFirst({ where: { id, workspaceId: workspace.id }, select: { id: true } });
+    if (!owned) return notFound("Campaign not found");
+
     await prisma.keywordCampaign.delete({ where: { id } });
     return json({ deleted: true });
   } catch (e) {

@@ -7,7 +7,7 @@
  *   3. Emergency Response (event-triggered) — handle breaking trends
  */
 import { callGptJson } from "@/lib/llm";
-import { cacheGetJSON, cacheSetJSON } from "@/lib/redis";
+import { cacheGetJSON, cacheSetJSON, wsKey } from "@/lib/redis";
 import { z } from "zod";
 import type {
   AgentContext,
@@ -31,34 +31,37 @@ export async function runWeeklyStrategy(ctx: AgentContext): Promise<{
   // 1-5. Fetch all context data in parallel (~2-3s faster than sequential)
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  // topicPerformance cached for 6h (changes slowly, queried frequently)
-  const cachedTopicPerf = await cacheGetJSON<Array<{ topic: string; avgEngagement: number }>>("chief-editor:topic-perf");
+  // topicPerformance cached for 6h per workspace (changes slowly, queried frequently)
+  const topicPerfCacheKey = wsKey(ctx.workspaceId, "chief-editor", "topic-perf");
+  const cachedTopicPerf = await cacheGetJSON<Array<{ topic: string; avgEngagement: number }>>(topicPerfCacheKey);
 
   const [latestGrowthRun, topicPerformance, recentContent, personas, accounts] = await Promise.all([
     ctx.prisma.agentRun.findFirst({
-      where: { agentName: "growth-analyst", status: "completed" },
+      where: { workspaceId: ctx.workspaceId, agentName: "growth-analyst", status: "completed" },
       orderBy: { completedAt: "desc" },
       select: { outputJson: true },
     }),
     cachedTopicPerf
       ? Promise.resolve(cachedTopicPerf)
       : ctx.prisma.topicPerformance.findMany({
+          where: { workspaceId: ctx.workspaceId },
           orderBy: { avgEngagement: "desc" },
           take: 20,
         }).then(async (data) => {
-          await cacheSetJSON("chief-editor:topic-perf", data, TOPIC_PERF_CACHE_TTL);
+          await cacheSetJSON(topicPerfCacheKey, data, TOPIC_PERF_CACHE_TTL);
           return data;
         }),
     ctx.prisma.pipelineRun.findMany({
-      where: { createdAt: { gte: weekAgo } },
+      where: { workspaceId: ctx.workspaceId, createdAt: { gte: weekAgo } },
       select: { topic: true, contentType: true, status: true },
       take: 30,
     }),
     ctx.prisma.writingPersona.findMany({
-      where: { isActive: true },
+      where: { workspaceId: ctx.workspaceId, isActive: true },
       select: { id: true, name: true, styleFingerprint: true, expertiseAreas: true },
     }),
     ctx.prisma.snsAccount.findMany({
+      where: { workspaceId: ctx.workspaceId },
       select: { platform: true, displayName: true },
     }),
   ]);
@@ -139,6 +142,7 @@ Return JSON only.`;
 
   const weeklyPlan = await ctx.prisma.weeklyPlan.create({
     data: {
+      workspaceId: ctx.workspaceId,
       weekStart: monday,
       weekEnd: sunday,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -171,16 +175,16 @@ export async function runDailyBriefing(ctx: AgentContext): Promise<{
 
   const [weeklyPlan, latestTrendRun, yesterdayBriefing] = await Promise.all([
     ctx.prisma.weeklyPlan.findFirst({
-      where: { weekStart: { lte: today }, weekEnd: { gte: today } },
+      where: { workspaceId: ctx.workspaceId, weekStart: { lte: today }, weekEnd: { gte: today } },
       orderBy: { createdAt: "desc" },
     }),
     ctx.prisma.agentRun.findFirst({
-      where: { agentName: "trend-scout", status: "completed" },
+      where: { workspaceId: ctx.workspaceId, agentName: "trend-scout", status: "completed" },
       orderBy: { completedAt: "desc" },
       select: { outputJson: true },
     }),
     ctx.prisma.dailyBriefing.findUnique({
-      where: { date: yesterday },
+      where: { workspaceId_date: { workspaceId: ctx.workspaceId, date: yesterday } },
     }),
   ]);
 
@@ -259,8 +263,9 @@ export async function runDailyBriefing(ctx: AgentContext): Promise<{
 
   // 5. Save briefing
   const briefing = await ctx.prisma.dailyBriefing.upsert({
-    where: { date: today },
+    where: { workspaceId_date: { workspaceId: ctx.workspaceId, date: today } },
     create: {
+      workspaceId: ctx.workspaceId,
       date: today,
       weeklyPlanId: weeklyPlan?.id,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -299,7 +304,7 @@ export async function runEmergencyResponse(
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const briefing = await ctx.prisma.dailyBriefing.findUnique({
-    where: { date: today },
+    where: { workspaceId_date: { workspaceId: ctx.workspaceId, date: today } },
   });
   const currentAssignments = (briefing?.assignmentsJson as unknown as DailyAssignment[]) ?? [];
   const pendingCount = currentAssignments.filter(

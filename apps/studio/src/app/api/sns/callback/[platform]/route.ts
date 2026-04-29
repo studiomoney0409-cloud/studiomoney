@@ -3,6 +3,7 @@ import { badRequest, serverError } from "@/lib/studio";
 import { getAdapter } from "@/lib/sns/platforms";
 import { saveAccount } from "@/lib/sns/tokenManager";
 import { enqueueJob } from "@/lib/jobs";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 /** GET /api/sns/callback/:platform — OAuth callback handler (redirect from SNS) */
 export async function GET(
@@ -10,6 +11,10 @@ export async function GET(
   { params }: { params: Promise<{ platform: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const { platform } = await params;
     const url = new URL(req.url);
     const code = url.searchParams.get("code");
@@ -28,15 +33,13 @@ export async function GET(
 
     const adapter = getAdapter(platform);
     const result = await adapter.handleCallback(code, callbackUrl);
-    const account = await saveAccount(result, platform);
+    const account = await saveAccount(result, platform, workspace.id);
 
-    // Queue onboarding analysis job for auto-persona creation
     await enqueueJob({
       type: "onboard_analyze",
-      payload: { accountId: account.id },
+      payload: { accountId: account.id, workspaceId: workspace.id },
     }).catch(() => {/* non-critical */});
 
-    // Redirect back to accounts page with success
     return NextResponse.redirect(
       new URL(`/studio/accounts?connected=${platform}`, baseUrl),
     );

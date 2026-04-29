@@ -2,13 +2,20 @@ import { prisma } from "@/lib/db";
 import { json, badRequest, serverError } from "@/lib/studio";
 import { discoverProfile } from "@/lib/sns/instagram-discovery";
 import { enqueueJob } from "@/lib/jobs";
+import { workspaceGuard } from "@/lib/auth/route-guard";
+import { nicheContextFromWorkspace } from "@/lib/niche/context";
 
 /**
- * GET /api/reference-accounts — list all reference accounts with feed count.
+ * GET /api/reference-accounts — list reference accounts in this workspace.
  */
 export async function GET() {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const accounts = await prisma.referenceAccount.findMany({
+      where: { workspaceId: workspace.id },
       orderBy: { createdAt: "desc" },
       include: {
         _count: { select: { feeds: true } },
@@ -40,12 +47,13 @@ export async function GET() {
 /**
  * POST /api/reference-accounts — add a new reference account.
  * Body: { username, platform?, category?, tags? }
- *
- * Validates that the username belongs to a Business/Creator IG account,
- * then enqueues an immediate sync job.
  */
 export async function POST(req: Request) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+
     const body = (await req.json()) as {
       username?: string;
       platform?: string;
@@ -58,13 +66,11 @@ export async function POST(req: Request) {
 
     const platform = body.platform ?? "instagram";
 
-    // Check for duplicate
     const existing = await prisma.referenceAccount.findUnique({
-      where: { platform_username: { platform, username } },
+      where: { workspaceId_platform_username: { workspaceId: workspace.id, platform, username } },
     });
-    if (existing) return badRequest(`@${username} is already registered`);
+    if (existing) return badRequest(`@${username} is already registered in this workspace`);
 
-    // Validate via Business Discovery
     const profile = await discoverProfile(username);
     if (!profile) {
       return badRequest(
@@ -73,21 +79,23 @@ export async function POST(req: Request) {
       );
     }
 
-    // Create account
+    const tpl = await prisma.nicheTemplate.findUnique({ where: { niche: workspace.niche } });
+    const ctx = nicheContextFromWorkspace(workspace, tpl);
+
     const account = await prisma.referenceAccount.create({
       data: {
+        workspaceId: workspace.id,
         platform,
         username,
         platformUserId: profile.id,
         displayName: profile.name,
         profileImageUrl: profile.profilePictureUrl,
         followersCount: profile.followersCount,
-        category: body.category ?? "artist",
+        category: body.category ?? ctx.defaultCategory,
         tags: body.tags ?? [],
       },
     });
 
-    // Enqueue immediate feed sync
     await enqueueJob({
       type: "reference_feed_sync",
       payload: { accountId: account.id },

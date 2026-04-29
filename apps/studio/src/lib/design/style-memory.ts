@@ -16,6 +16,8 @@ import type { StyleToken } from "./types";
 export interface StyleMemoryEntry {
   /** Unique key: "artist:{spotifyId}" or "album:{spotifyId}" */
   key: string;
+  /** Workspace owning this entry. Optional for legacy callers; resolved to default workspace. */
+  workspaceId?: string;
   token: StyleToken;
   source: "spotify_album_art" | "user_upload" | "url_extraction";
   artistName?: string;
@@ -99,28 +101,34 @@ export function saveStyleMemory(entry: Omit<StyleMemoryEntry, "accessCount" | "l
   // Persist to DB (fire-and-forget)
   const p = db();
   if (p) {
-    void p.styleMemoryEntry.upsert({
-      where: { key: entry.key },
-      create: {
-        key: entry.key,
-        tokenJson: JSON.parse(JSON.stringify(entry.token)),
-        source: entry.source,
-        artistName: entry.artistName ?? "",
-        albumName: entry.albumName ?? "",
-        spotifyArtistId: entry.spotifyArtistId ?? "",
-        spotifyAlbumId: entry.spotifyAlbumId ?? "",
-        confidence: entry.confidence,
-        extractedAt: entry.extractedAt,
-      },
-      update: {
-        tokenJson: JSON.parse(JSON.stringify(entry.token)),
-        source: entry.source,
-        artistName: entry.artistName ?? "",
-        albumName: entry.albumName ?? "",
-        confidence: entry.confidence,
-        extractedAt: entry.extractedAt,
-      },
-    }).catch(() => { /* DB unavailable — memory-only mode */ });
+    void (async () => {
+      const { fallbackWorkspaceId } = await import("@/lib/auth/workspace-fallback");
+      const workspaceId = entry.workspaceId ?? (await fallbackWorkspaceId());
+      if (!workspaceId) return;
+      await p.styleMemoryEntry.upsert({
+        where: { workspaceId_key: { workspaceId, key: entry.key } },
+        create: {
+          workspaceId,
+          key: entry.key,
+          tokenJson: JSON.parse(JSON.stringify(entry.token)),
+          source: entry.source,
+          artistName: entry.artistName ?? "",
+          albumName: entry.albumName ?? "",
+          spotifyArtistId: entry.spotifyArtistId ?? "",
+          spotifyAlbumId: entry.spotifyAlbumId ?? "",
+          confidence: entry.confidence,
+          extractedAt: entry.extractedAt,
+        },
+        update: {
+          tokenJson: JSON.parse(JSON.stringify(entry.token)),
+          source: entry.source,
+          artistName: entry.artistName ?? "",
+          albumName: entry.albumName ?? "",
+          confidence: entry.confidence,
+          extractedAt: entry.extractedAt,
+        },
+      });
+    })().catch(() => { /* DB unavailable — memory-only mode */ });
   }
 }
 
@@ -153,7 +161,10 @@ export async function getStyleMemoryAsync(key: string): Promise<StyleToken | und
   if (!p) return undefined;
 
   try {
-    const row = await p.styleMemoryEntry.findUnique({ where: { key } });
+    const { fallbackWorkspaceId } = await import("@/lib/auth/workspace-fallback");
+    const workspaceId = await fallbackWorkspaceId();
+    if (!workspaceId) return undefined;
+    const row = await p.styleMemoryEntry.findUnique({ where: { workspaceId_key: { workspaceId, key } } });
     if (!row) return undefined;
 
     const token = row.tokenJson as unknown as StyleToken;
@@ -183,10 +194,15 @@ export async function getStyleMemoryAsync(key: string): Promise<StyleToken | und
 function touchDb(key: string): void {
   const p = db();
   if (!p) return;
-  void p.styleMemoryEntry.update({
-    where: { key },
-    data: { accessCount: { increment: 1 }, lastAccessedAt: new Date() },
-  }).catch(() => {});
+  void (async () => {
+    const { fallbackWorkspaceId } = await import("@/lib/auth/workspace-fallback");
+    const workspaceId = await fallbackWorkspaceId();
+    if (!workspaceId) return;
+    await p.styleMemoryEntry.update({
+      where: { workspaceId_key: { workspaceId, key } },
+      data: { accessCount: { increment: 1 }, lastAccessedAt: new Date() },
+    });
+  })().catch(() => {});
 }
 
 /**

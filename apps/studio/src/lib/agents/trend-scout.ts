@@ -6,7 +6,7 @@
  */
 import { fetchTrends } from "@/lib/trends";
 import { discoverTopics, type TopicBrief } from "@/lib/pipeline/topic-intelligence";
-import { cacheGetJSON, cacheSetJSON } from "@/lib/redis";
+import { cacheGetJSON, cacheSetJSON, wsKey } from "@/lib/redis";
 import type { AgentContext, TrendBriefing, ScoredTopic, UrgentAlert } from "./types";
 
 const VELOCITY_URGENT_THRESHOLD = 80;
@@ -15,9 +15,9 @@ const TOPIC_CACHE_TTL = 7200; // 2 hours — topics don't change faster than thi
 export async function runTrendScout(ctx: AgentContext): Promise<TrendBriefing> {
   await ctx.log("info", "Starting trend scan");
 
-  // 1. Get active autopilot keywords
+  // 1. Get active autopilot keywords for this workspace
   const configs = await ctx.prisma.autopilotConfig.findMany({
-    where: { isActive: true },
+    where: { workspaceId: ctx.workspaceId, isActive: true },
     select: { topicKeywords: true },
   });
   const keywords = [...new Set(configs.flatMap((c: { topicKeywords: string[] }) => c.topicKeywords))];
@@ -26,8 +26,8 @@ export async function runTrendScout(ctx: AgentContext): Promise<TrendBriefing> {
   const { global, niche } = await fetchTrends(keywords.length > 0 ? keywords as string[] : undefined);
   await ctx.log("info", `Fetched ${global.length} global + ${niche.length} niche trends`);
 
-  // 3. Discover topics — cached for 2 hours to reduce LLM calls (~70% savings)
-  const cacheKey = `trend-scout:topics:${keywords.sort().join(",")}`;
+  // 3. Discover topics — cached for 2 hours per workspace to reduce LLM calls (~70% savings)
+  const cacheKey = wsKey(ctx.workspaceId, "trend-scout", "topics", keywords.sort().join(","));
   let topicBriefs = await cacheGetJSON<TopicBrief[]>(cacheKey);
 
   if (topicBriefs) {
@@ -43,10 +43,10 @@ export async function runTrendScout(ctx: AgentContext): Promise<TrendBriefing> {
     await ctx.log("info", `Discovered ${topicBriefs.length} topics (cached for ${TOPIC_CACHE_TTL}s)`);
   }
 
-  // 4. Velocity spike detection — compare with TrendSnapshot 24h ago
+  // 4. Velocity spike detection — compare with TrendSnapshot 24h ago (within this workspace)
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const recentSnapshots = await ctx.prisma.trendSnapshot.findMany({
-    where: { fetchedAt: { gte: dayAgo } },
+    where: { workspaceId: ctx.workspaceId, fetchedAt: { gte: dayAgo } },
     select: { title: true, rank: true, source: true, fetchedAt: true },
     orderBy: { fetchedAt: "desc" },
     take: 200,

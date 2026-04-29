@@ -20,6 +20,8 @@ export type AspectRatio = "landscape" | "square" | "portrait";
 
 export interface ImageGenOptions {
   prompt: string;
+  /** Workspace owning this generation (history record). Optional — defaults to system default workspace. */
+  workspaceId?: string;
   /** Override auto-routing */
   provider?: ImageProvider;
   /** Hints for auto-routing */
@@ -68,9 +70,14 @@ function estimateCost(provider: ImageProvider, quality?: string): number {
 function saveToHistory(result: ImageGenResult, opts: ImageGenOptions): void {
   try {
     // Dynamic import to avoid circular deps and client-side issues
-    import("@/lib/db").then(({ prisma }) => {
-      prisma.imageGenHistory.create({
+    void (async () => {
+      const { prisma } = await import("@/lib/db");
+      const { fallbackWorkspaceId } = await import("@/lib/auth/workspace-fallback");
+      const workspaceId = opts.workspaceId ?? (await fallbackWorkspaceId());
+      if (!workspaceId) return;
+      await prisma.imageGenHistory.create({
         data: {
+          workspaceId,
           prompt: opts.prompt,
           revisedPrompt: result.revisedPrompt,
           provider: result.provider,
@@ -82,8 +89,8 @@ function saveToHistory(result: ImageGenResult, opts: ImageGenOptions): void {
           costUsd: result.costUsd,
           elapsedMs: result.elapsedMs,
         },
-      }).catch(() => {}); // silently fail — history is non-critical
-    }).catch(() => {});
+      });
+    })().catch(() => {}); // silently fail — history is non-critical
   } catch {
     // prisma not available
   }

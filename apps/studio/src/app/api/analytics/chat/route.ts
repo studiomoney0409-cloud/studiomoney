@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { prisma } from "@/lib/db";
-import { cacheGet, cacheSet } from "@/lib/redis";
+import { cacheGet, cacheSet, wsKey } from "@/lib/redis";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 const openai = new OpenAI();
 
@@ -11,8 +12,8 @@ interface ChatRequest {
 
 const CONTEXT_CACHE_TTL_SEC = 60 * 60; // 1 hour
 
-async function getAnalyticsContext(accountId?: string): Promise<string> {
-  const cacheKey = `analytics-ctx:${accountId ?? "__all__"}`;
+async function getAnalyticsContext(workspaceId: string, accountId?: string): Promise<string> {
+  const cacheKey = wsKey(workspaceId, "analytics-ctx", accountId ?? "__all__");
   const cached = await cacheGet(cacheKey);
   if (cached) return cached;
 
@@ -23,17 +24,17 @@ async function getAnalyticsContext(accountId?: string): Promise<string> {
 
   const [snapshots, recentPubs, performances] = await Promise.all([
     prisma.analyticsSnapshot.findMany({
-      where: { date: { gte: since }, ...accountFilter },
+      where: { workspaceId, date: { gte: since }, ...accountFilter },
       orderBy: { date: "desc" },
       take: 30,
     }),
     prisma.publication.findMany({
-      where: { publishedAt: { gte: since }, ...accountFilter },
+      where: { workspaceId, publishedAt: { gte: since }, ...accountFilter },
       orderBy: { publishedAt: "desc" },
       take: 10,
     }),
     prisma.postPerformance.findMany({
-      where: { publishedAt: { gte: since }, ...accountFilter },
+      where: { workspaceId, publishedAt: { gte: since }, ...accountFilter },
       orderBy: { engagementRate: "desc" },
       take: 10,
     }),
@@ -67,10 +68,14 @@ ${performances.map((p) =>
  * Streams GPT responses with context from analytics data (cached 1h).
  */
 export async function POST(req: Request) {
+  const guard = await workspaceGuard();
+  if (!guard.ok) return guard.response;
+  const { workspace } = guard.ctx;
+
   const body = (await req.json()) as ChatRequest;
   const { messages } = body;
 
-  const analyticsContext = await getAnalyticsContext(body.accountId);
+  const analyticsContext = await getAnalyticsContext(workspace.id, body.accountId);
 
   const systemPrompt = `You are an AI social media analytics assistant for a Korean content creator.
 You have access to their SNS performance data. Answer questions about their performance,

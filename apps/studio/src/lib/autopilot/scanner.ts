@@ -343,6 +343,7 @@ export async function publishApprovedProposals(): Promise<number> {
       const content = proposal.content as Record<string, unknown>;
       const pub = await prisma.publication.create({
         data: {
+          workspaceId: config.workspaceId,
           snsAccountId: config.snsAccountId,
           platform: proposal.platform,
           content: content as JsonInput,

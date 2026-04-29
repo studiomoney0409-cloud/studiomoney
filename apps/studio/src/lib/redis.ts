@@ -168,3 +168,15 @@ export async function cacheSetJSON(key: string, value: unknown, ttlSec?: number)
 export function isRedisConnected(): boolean {
   return !fallbackMode && client?.status === "ready";
 }
+
+/**
+ * Build a workspace-scoped cache key. Use this for any cached data that depends
+ * on a single workspace's content, configs, or analytics. Format: "ws:{workspaceId}:{...parts}".
+ *
+ * Example:
+ *   wsKey(workspace.id, "trend-scout", "topics", keywords.join(","))
+ *   // → "ws:cm9x...:trend-scout:topics:K-pop,indie"
+ */
+export function wsKey(workspaceId: string, ...parts: (string | number)[]): string {
+  return ["ws", workspaceId, ...parts.map(String)].join(":");
+}

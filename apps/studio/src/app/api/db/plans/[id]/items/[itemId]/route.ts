@@ -1,12 +1,23 @@
 import { prisma } from "@/lib/db";
 import { json, notFound, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string; itemId: string }> },
 ) {
   try {
-    const { itemId } = await params;
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+    const { id: planId, itemId } = await params;
+
+    const owned = await prisma.planItem.findFirst({
+      where: { id: itemId, plan: { id: planId, workspaceId: workspace.id } },
+      select: { id: true },
+    });
+    if (!owned) return notFound("Item not found");
+
     const body = (await req.json()) as Record<string, unknown>;
     const item = await prisma.planItem.update({
       where: { id: itemId },
@@ -24,7 +35,17 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; itemId: string }> },
 ) {
   try {
-    const { itemId } = await params;
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
+    const { id: planId, itemId } = await params;
+
+    const owned = await prisma.planItem.findFirst({
+      where: { id: itemId, plan: { id: planId, workspaceId: workspace.id } },
+      select: { id: true },
+    });
+    if (!owned) return notFound("Item not found");
+
     await prisma.planItem.delete({ where: { id: itemId } });
     return json({ ok: true });
   } catch (e) {

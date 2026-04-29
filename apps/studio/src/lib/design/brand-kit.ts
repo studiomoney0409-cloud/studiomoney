@@ -207,11 +207,11 @@ export function pickGradient(kit: BrandKit, index: number): string {
  * Load a user's brand kit from the database.
  * Falls back to DEFAULT_BRAND_KIT if no kit exists or DB is unavailable.
  */
-export async function loadBrandKit(userId: string): Promise<BrandKit> {
+export async function loadBrandKit(workspaceId: string): Promise<BrandKit> {
   try {
     const { prisma } = await import("@/lib/db");
     const record = await prisma.brandKit.findFirst({
-      where: { userId, isDefault: true },
+      where: { workspaceId, isDefault: true },
       orderBy: { updatedAt: "desc" },
     });
 
@@ -271,7 +271,7 @@ export async function loadBrandKit(userId: string): Promise<BrandKit> {
  * Save or update a brand kit in the database.
  */
 export async function saveBrandKit(
-  userId: string,
+  workspaceId: string,
   kit: Partial<BrandKit> & { name?: string },
 ): Promise<void> {
   const { prisma } = await import("@/lib/db");
@@ -315,8 +315,8 @@ export async function saveBrandKit(
   };
 
   await prisma.brandKit.upsert({
-    where: { id: `${userId}-default` },
-    create: { id: `${userId}-default`, userId, isDefault: true, ...data },
+    where: { id: `${workspaceId}-default` },
+    create: { id: `${workspaceId}-default`, workspaceId, isDefault: true, ...data },
     update: data,
   });
 }

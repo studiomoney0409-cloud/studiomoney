@@ -122,6 +122,7 @@ ${postSummaries}
   // 4. Create NewsletterIssue record
   const issue = await ctx.prisma.newsletterIssue.create({
     data: {
+      workspaceId: ctx.workspaceId,
       subject: curation.subjectA,
       subjectB: curation.subjectB,
       bodyHtml,

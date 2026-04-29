@@ -1,12 +1,19 @@
 import { prisma } from "@/lib/db";
-import { json, serverError } from "@/lib/studio";
+import { json, notFound, serverError } from "@/lib/studio";
+import { workspaceGuard } from "@/lib/auth/route-guard";
 
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const guard = await workspaceGuard();
+    if (!guard.ok) return guard.response;
+    const { workspace } = guard.ctx;
     const { id: planId } = await params;
+    const owned = await prisma.contentPlan.findFirst({ where: { id: planId, workspaceId: workspace.id }, select: { id: true } });
+    if (!owned) return notFound("Plan not found");
+
     const body = (await req.json()) as Record<string, unknown>;
 
     const item = await prisma.planItem.create({
