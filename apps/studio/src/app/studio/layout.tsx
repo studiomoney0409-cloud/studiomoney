@@ -10,6 +10,8 @@ import PipelineProvider from "./_components/pipeline/PipelineProvider";
 import PipelineOverlay from "./_components/pipeline/PipelineOverlay";
 import PipelineStepHint from "./_components/pipeline/PipelineStepHint";
 import PipelineAwareFab from "./_components/pipeline/PipelineAwareFab";
+import { WorkspaceProvider } from "./_components/workspace/WorkspaceProvider";
+import WorkspaceSwitcher from "./_components/workspace/WorkspaceSwitcher";
 
 export default function StudioLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -17,74 +19,77 @@ export default function StudioLayout({ children }: { children: React.ReactNode }
   const [composerOpen, setComposerOpen] = useState(false);
 
   return (
-    <PipelineProvider>
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-        {/* Top header with tabs */}
-        <header
-          style={{
-            position: "sticky",
-            top: 0,
-            zIndex: 100,
-            background: "var(--bg-card)",
-            borderBottom: "1px solid var(--border)",
-          }}
-        >
-          <div
+    <WorkspaceProvider>
+      <PipelineProvider>
+        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+          {/* Top header with tabs */}
+          <header
             style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              maxWidth: 1280,
-              margin: "0 auto",
-              padding: isMobile ? "10px 12px" : "10px 32px",
-              gap: 16,
+              position: "sticky",
+              top: 0,
+              zIndex: 100,
+              background: "var(--bg-card)",
+              borderBottom: "1px solid var(--border)",
             }}
           >
-            {/* Brand */}
-            <span
+            <div
               style={{
-                fontSize: 18,
-                fontWeight: 700,
-                letterSpacing: "-0.02em",
-                color: "var(--text)",
-                flexShrink: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                maxWidth: 1280,
+                margin: "0 auto",
+                padding: isMobile ? "10px 12px" : "10px 32px",
+                gap: 16,
               }}
             >
-              Studio
-            </span>
+              {/* Brand */}
+              <span
+                style={{
+                  fontSize: 18,
+                  fontWeight: 700,
+                  letterSpacing: "-0.02em",
+                  color: "var(--text)",
+                  flexShrink: 0,
+                }}
+              >
+                Studio
+              </span>
 
-            {/* Tabs */}
-            <TabBar />
+              {/* Tabs */}
+              <TabBar />
 
-            {/* Feature Guide */}
-            <div style={{ flexShrink: 0 }}>
-              <FeatureGuide />
+              {/* Right cluster: workspace switcher + feature guide */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                <WorkspaceSwitcher />
+                <FeatureGuide />
+              </div>
             </div>
-          </div>
-        </header>
+          </header>
 
-        {/* Main content */}
-        <main
-          className="page-enter"
-          key={pathname}
-          style={{
-            flex: 1,
-            padding: isMobile ? "20px 16px 80px" : "28px 32px 80px",
-            maxWidth: 1280,
-            margin: "0 auto",
-            width: "100%",
-            position: "relative",
-          }}
-        >
-          <PipelineStepHint />
-          {children}
-        </main>
+          {/* Main content */}
+          <main
+            className="page-enter"
+            key={pathname}
+            style={{
+              flex: 1,
+              padding: isMobile ? "20px 16px 80px" : "28px 32px 80px",
+              maxWidth: 1280,
+              margin: "0 auto",
+              width: "100%",
+              position: "relative",
+            }}
+          >
+            <PipelineStepHint />
+            {children}
+          </main>
 
-        {/* FAB: New Post */}
-        <PipelineAwareFab isMobile={isMobile} onClick={() => setComposerOpen(true)} />
-        <UnifiedComposer open={composerOpen} onClose={() => setComposerOpen(false)} />
-        <PipelineOverlay />
-      </div>
-    </PipelineProvider>
+          {/* FAB: New Post */}
+          <PipelineAwareFab isMobile={isMobile} onClick={() => setComposerOpen(true)} />
+          <UnifiedComposer open={composerOpen} onClose={() => setComposerOpen(false)} />
+          <PipelineOverlay />
+        </div>
+      </PipelineProvider>
+    </WorkspaceProvider>
   );
 }
