@@ -37,6 +37,14 @@ export async function POST(req: Request) {
     });
     if (!account) return badRequest("snsAccount not in this workspace");
 
+    // First autopilot in a workspace defaults to active (kick off auto cycle).
+    // Subsequent configs default to inactive — explicit opt-in.
+    const existingCount = await prisma.autopilotConfig.count({
+      where: { workspaceId: workspace.id },
+    });
+    const isActive =
+      body.isActive !== undefined ? Boolean(body.isActive) : existingCount === 0;
+
     const config = await prisma.autopilotConfig.create({
       data: {
         workspaceId: workspace.id,
@@ -46,7 +54,7 @@ export async function POST(req: Request) {
         postsPerDay: (body.postsPerDay as number) ?? 1,
         approvalMode: (body.approvalMode as string) ?? "manual",
         topicKeywords: (body.topicKeywords as string[]) ?? [],
-        isActive: (body.isActive as boolean) ?? false,
+        isActive,
       },
     });
     return json(config, 201);
