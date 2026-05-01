@@ -60,23 +60,28 @@ const KG_SYNC_BUDGET = 3;
 
 /**
  * Enrich a list of trend items with real-time context.
+ *
+ * `niche` controls whether music-specific KG enrichment runs:
+ * - "music" (or undefined for legacy callers): full KG lookup + Spotify sync
+ * - other niches: skips KG/Spotify entirely; only web enrichment + LLM summary
  */
 export async function enrichTrends(
   items: TrendItem[],
-  opts?: { maxItems?: number; skipLlm?: boolean },
+  opts?: { maxItems?: number; skipLlm?: boolean; niche?: string },
 ): Promise<EnrichedTrendItem[]> {
   const max = opts?.maxItems ?? MAX_ITEMS;
   const toEnrich = items.slice(0, max);
   const passthrough = items.slice(max);
+  const isMusic = opts?.niche === "music" || opts?.niche === undefined;
 
   // Stage A: entity extraction (local, no API calls)
   const withEntities = toEnrich.map((item) => ({
     item,
-    entities: extractEntities(item),
+    entities: extractEntities(item, { isMusic }),
   }));
 
   // Stage B: parallel KG + web enrichment (with per-item caching)
-  const enriched = await enrichBatch(withEntities);
+  const enriched = await enrichBatch(withEntities, { isMusic });
 
   // Stage C: batch LLM summarization
   if (!opts?.skipLlm) {
@@ -109,7 +114,7 @@ const STOP_WORDS = new Set([
   "까지", "처럼", "만큼", "대로", "트렌드", "분석", "리뷰",
 ]);
 
-function extractEntities(item: TrendItem): ExtractedEntities {
+function extractEntities(item: TrendItem, opts: { isMusic: boolean }): ExtractedEntities {
   const text = `${item.title} ${item.description ?? ""}`;
   const entities: ExtractedEntities = {
     artists: [],
@@ -120,16 +125,18 @@ function extractEntities(item: TrendItem): ExtractedEntities {
 
   const lower = text.toLowerCase();
 
-  // Genres
-  for (const g of GENRE_PATTERNS) {
-    if (lower.includes(g)) entities.genres.push(g);
-  }
+  if (opts.isMusic) {
+    // Genres
+    for (const g of GENRE_PATTERNS) {
+      if (lower.includes(g)) entities.genres.push(g);
+    }
 
-  // Quoted strings → album/song names
-  const quoted = text.match(/[""'']([^""'']+)[""'']/g);
-  if (quoted) {
-    for (const q of quoted) {
-      entities.albums.push(q.replace(/[""'']/g, ""));
+    // Quoted strings → album/song names
+    const quoted = text.match(/[""'']([^""'']+)[""'']/g);
+    if (quoted) {
+      for (const q of quoted) {
+        entities.albums.push(q.replace(/[""'']/g, ""));
+      }
     }
   }
 
@@ -174,6 +181,7 @@ interface EnrichmentInput {
 
 async function enrichBatch(
   inputs: EnrichmentInput[],
+  opts: { isMusic: boolean },
 ): Promise<EnrichedTrendItem[]> {
   let webSearchCount = 0;
   let urlExtractCount = 0;
@@ -190,8 +198,8 @@ async function enrichBatch(
     const result: EnrichedTrendItem = { ...item, entities: [] };
     const webSources: WebSource[] = [];
 
-    // KG lookup for each artist entity
-    for (const artistName of entities.artists.slice(0, 3)) {
+    // Music-only: KG (MusicArtist) lookup + Spotify sync fallback
+    if (opts.isMusic) for (const artistName of entities.artists.slice(0, 3)) {
       const artist = await prisma.musicArtist.findFirst({
         where: {
           OR: [
@@ -250,9 +258,11 @@ async function enrichBatch(
       }
     }
 
-    // Album entities
-    for (const albumName of entities.albums.slice(0, 2)) {
-      result.entities!.push({ name: albumName, type: "album" });
+    // Album entities (music-specific buckets are empty for non-music niches)
+    if (opts.isMusic) {
+      for (const albumName of entities.albums.slice(0, 2)) {
+        result.entities!.push({ name: albumName, type: "album" });
+      }
     }
 
     // Web search (only for non-Instagram sources, within budget)
