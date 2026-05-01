@@ -22,6 +22,9 @@ const ENV_VARS: EnvVar[] = [
   { key: "SPOTIFY_CLIENT_SECRET", required: false, description: "Spotify API client secret" },
   { key: "UNSPLASH_ACCESS_KEY", required: false, description: "Unsplash image API key" },
   { key: "PEXELS_API_KEY", required: false, description: "Pexels image API key" },
+  { key: "SENTRY_DSN", required: false, description: "Sentry DSN — when set, server/edge instrumentation captures exceptions" },
+  { key: "REDIS_URL", required: false, description: "Redis connection URL (cache + workspace-scoped keys); falls back to in-memory" },
+  { key: "R2_ENDPOINT", required: false, description: "Cloudflare R2 endpoint for persistent file storage; falls back to /tmp" },
 ];
 
 export interface EnvValidationResult {
