@@ -20,7 +20,7 @@
     "@fal-ai/client": "^1.9.4",
     "@google/generative-ai": "^0.24.1",
     "@sentry/nextjs": "^10.43.0",
-    "inngest": "^3.52.6",
+    "inngest": "^3.54.2",
     "ioredis": "^5.10.0",
     "jspdf": "^4.2.0",
     "pino": "^10.3.1",
