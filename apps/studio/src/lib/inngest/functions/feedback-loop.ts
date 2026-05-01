@@ -2,15 +2,16 @@
  * Feedback Loop — triggered by Growth Analyst weekly report.
  *
  * Runs the full feedback analysis pipeline:
- * 1. Auto-select golden examples for personas (top 20% articles)
- * 2. Calibrate rubric weights (correlate scores with engagement)
- * 3. Check anti-clickbait guardrails
+ * 1. Topic performance analysis (writes TopicPerformance + Setting "topic-insights")
+ * 2. Auto-select golden examples for personas (top 20% articles)
+ * 3. Calibrate rubric weights (correlate scores with engagement)
+ * 4. Check anti-clickbait guardrails
  *
- * This closes the persona learning loop:
- *   Growth Analyst → Feedback Analyzer → Persona Update
+ * Closes the learning loop: Growth Analyst → Feedback Analyzer → Persona/Topic Update.
  */
 import { inngest } from "../client";
 import {
+  analyzeTopicPerformance,
   autoSelectGoldenExamples,
   calibrateRubricWeights,
   checkGuardrails,
@@ -29,22 +30,52 @@ export const feedbackLoop = inngest.createFunction(
       return { skipped: true, reason: "Only runs on weekly reports" };
     }
 
-    // 1. Auto-select golden examples
+    // 1. Topic performance analysis (writes to TopicPerformance table)
+    const topicResult = await step.run("analyze-topic-performance", () =>
+      analyzeTopicPerformance(),
+    );
+
+    // 2. Auto-select golden examples
     const goldenResult = await step.run("auto-select-golden-examples", () =>
       autoSelectGoldenExamples(),
     );
 
-    // 2. Calibrate rubric weights
+    // 3. Calibrate rubric weights
     const rubricResult = await step.run("calibrate-rubric-weights", () =>
       calibrateRubricWeights(),
     );
 
-    // 3. Check guardrails
+    // 4. Check guardrails
     const guardrails = await step.run("check-guardrails", () =>
       checkGuardrails(),
     );
 
-    // 4. Notify if guardrails triggered
+    // 5. Persist topic insights snapshot for downstream readers (scanner, plan/generate)
+    if (topicResult.insights.length > 0) {
+      await step.run("store-topic-insights", async () => {
+        const { prisma } = await import("@/lib/db");
+        await prisma.setting.upsert({
+          where: { key: "topic-insights" },
+          create: {
+            key: "topic-insights",
+            value: JSON.stringify({
+              insights: topicResult.insights,
+              totalArticles: topicResult.totalArticles,
+              updatedAt: new Date().toISOString(),
+            }),
+          },
+          update: {
+            value: JSON.stringify({
+              insights: topicResult.insights,
+              totalArticles: topicResult.totalArticles,
+              updatedAt: new Date().toISOString(),
+            }),
+          },
+        });
+      });
+    }
+
+    // 6. Notify if guardrails triggered
     if (guardrails.alerts.length > 0) {
       await step.run("notify-guardrail-alerts", () =>
         notifySlack(
@@ -58,7 +89,7 @@ export const feedbackLoop = inngest.createFunction(
       );
     }
 
-    // 5. Store rubric calibration if available
+    // 7. Store rubric calibration if available
     if (rubricResult.calibrations.length > 0) {
       await step.run("store-rubric-calibration", async () => {
         const { prisma } = await import("@/lib/db");
@@ -76,6 +107,8 @@ export const feedbackLoop = inngest.createFunction(
     }
 
     return {
+      topicInsights: topicResult.insights.length,
+      totalArticlesTracked: topicResult.totalArticles,
       goldenExampleUpdates: goldenResult.updates.length,
       goldenSkipped: goldenResult.skipped || undefined,
       rubricCalibrations: rubricResult.calibrations.length,

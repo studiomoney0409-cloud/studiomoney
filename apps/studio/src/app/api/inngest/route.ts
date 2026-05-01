@@ -37,6 +37,7 @@ import { communityManagerScan } from "@/lib/inngest/functions/community-manager"
 // Phase 5: Auto-publish + Feedback Loop
 import { autoPublishAfterDesign } from "@/lib/inngest/functions/auto-publish";
 import { feedbackLoop } from "@/lib/inngest/functions/feedback-loop";
+import { feedbackCollect } from "@/lib/inngest/functions/feedback-collect";
 // Phase 6: Copy Editor → SEO → Monetization (publication pipeline gate)
 import { copyEditorGate } from "@/lib/inngest/functions/copy-editor";
 import { seoStrategistPrePublish, seoStrategistAudit } from "@/lib/inngest/functions/seo-strategist";
@@ -79,6 +80,7 @@ export const { GET, POST, PUT } = serve({
     // Phase 5: Auto-publish after design + Feedback learning loop
     autoPublishAfterDesign,
     feedbackLoop,
+    feedbackCollect,
     // Phase 6: Copy Editor → SEO Strategist → Monetization Manager
     copyEditorGate,
     seoStrategistPrePublish,

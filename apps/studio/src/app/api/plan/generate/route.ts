@@ -3,6 +3,8 @@ import { PlanGenerateRequestSchema, PlanGenerateResponseSchema } from "@/lib/stu
 import { CONTENT_CATEGORIES } from "@/lib/studio/contentCategories";
 import { prisma } from "@/lib/db";
 import { fetchTrends, formatEnrichedTrendsForPrompt } from "@/lib/trends";
+import { getWorkspaceOrNull } from "@/lib/auth/workspace";
+import { buildTopicPerformanceContext } from "@/lib/feedback/topic-context";
 
 interface FrequencyInput {
   weeklyTotal: number;
@@ -16,7 +18,7 @@ const DAY_NAMES_KR = ["일", "월", "화", "수", "목", "금", "토"] as const;
  * Fetch live trends + keywords and format for prompt injection.
  * Non-fatal — returns empty string on failure.
  */
-async function buildTrendContext(): Promise<string> {
+async function buildTrendContext(niche?: string): Promise<string> {
   try {
     // Load niche keywords
     const row = await prisma.setting.findUnique({ where: { key: "niche-keywords" } });
@@ -38,7 +40,7 @@ async function buildTrendContext(): Promise<string> {
     let enrichedAll: import("@/lib/trends/enrich").EnrichedTrendItem[];
     try {
       const { enrichTrends } = await import("@/lib/trends/enrich");
-      enrichedAll = await enrichTrends([...globalTrends, ...nicheTrends]);
+      enrichedAll = await enrichTrends([...globalTrends, ...nicheTrends], { niche });
     } catch {
       enrichedAll = [...globalTrends, ...nicheTrends];
     }
@@ -108,6 +110,7 @@ function buildSystemPrompt(
   existingEvents: Array<{ date: string; title: string; category: string }>,
   trendContext: string,
   artistAlbumContext: string,
+  topicPerformanceContext: string,
   preferences?: {
     focusCategories?: string[];
     avoidCategories?: string[];
@@ -168,6 +171,7 @@ ${categories}
 
 ${trendContext ? `## 실시간 트렌드 데이터\n${trendContext}` : ""}
 ${artistAlbumContext}
+${topicPerformanceContext}
 
 ## Rules:
 1. 날짜 범위: ${startDate} ~ ${endDate}, 주 ${frequency.weeklyTotal}개 게시, 하루 최대 ${frequency.maxPerDay}개
@@ -233,10 +237,14 @@ export async function POST(req: Request) {
 
   const { startDate, endDate, frequency, existingEvents, preferences } = parsed.data;
 
-  // Fetch real-time trends + artist data in parallel
-  const [trendContext, artistAlbumContext] = await Promise.all([
-    buildTrendContext(),
+  const ctx = await getWorkspaceOrNull();
+  const niche = ctx?.workspace.niche;
+
+  // Fetch real-time trends + artist data + topic performance feedback in parallel
+  const [trendContext, artistAlbumContext, topicPerformanceContext] = await Promise.all([
+    buildTrendContext(niche),
     buildArtistAlbumContext(),
+    buildTopicPerformanceContext(),
   ]);
 
   const client = new OpenAI({ apiKey });
@@ -247,6 +255,7 @@ export async function POST(req: Request) {
     existingEvents ?? [],
     trendContext,
     artistAlbumContext,
+    topicPerformanceContext,
     preferences,
   );
 

@@ -3,6 +3,7 @@ import { callGptJson } from "@/lib/llm";
 import { createLogger } from "@/lib/logger";
 import { notifySlack } from "@/lib/notify";
 import { fetchTrends, formatEnrichedTrendsForPrompt } from "@/lib/trends";
+import { buildTopicPerformanceContext } from "@/lib/feedback/topic-context";
 import { z } from "zod";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -21,32 +22,6 @@ interface ProposalDraft {
 // ---------------------------------------------------------------------------
 // Context builders — gather concrete "materials" for the prompt
 // ---------------------------------------------------------------------------
-
-async function buildTopicPerformanceContext(): Promise<string> {
-  const perf = await prisma.topicPerformance.findMany({
-    orderBy: { avgEngagement: "desc" },
-    take: 15,
-  });
-  if (perf.length === 0) return "";
-
-  const lines: string[] = ["\n## 토픽 성과 피드백 (실제 참여율 기반)"];
-  const rising = perf.slice(0, 5); // already sorted desc by avgEngagement
-  const declining = perf.filter((t) => t.avgEngagement < 0.02).slice(0, 5);
-
-  if (rising.length > 0) {
-    lines.push("참여율 상승 중 (적극 다루기):");
-    for (const t of rising.slice(0, 5)) {
-      lines.push(`- ${t.topic} (${t.category}, 평균 참여율: ${(t.avgEngagement * 100).toFixed(1)}%)`);
-    }
-  }
-  if (declining.length > 0) {
-    lines.push("참여율 하락 중 (피하기):");
-    for (const t of declining.slice(0, 5)) {
-      lines.push(`- ${t.topic} (${t.category}, 평균 참여율: ${(t.avgEngagement * 100).toFixed(1)}%)`);
-    }
-  }
-  return lines.join("\n");
-}
 
 async function buildArtistAlbumContext(): Promise<string> {
   const [artists, albums] = await Promise.all([
@@ -203,8 +178,10 @@ Respond ONLY with the JSON object.`;
 export async function generateProposals(configId: string): Promise<number> {
   const config = await prisma.autopilotConfig.findUnique({
     where: { id: configId },
+    include: { workspace: { select: { niche: true } } },
   });
   if (!config || !config.isActive) return 0;
+  const niche = config.workspace?.niche;
 
   // Count today's pending/approved/published proposals
   const todayStart = new Date();
@@ -243,7 +220,7 @@ export async function generateProposals(configId: string): Promise<number> {
   try {
     const { enrichTrends } = await import("@/lib/trends/enrich");
     const allRaw = [...globalTrends, ...nicheTrends];
-    const enriched = await enrichTrends(allRaw);
+    const enriched = await enrichTrends(allRaw, { niche });
     enrichedGlobal = enriched.filter((t) => !nicheTrends.some((n) => n.title === t.title));
     enrichedNiche = enriched.filter((t) => nicheTrends.some((n) => n.title === t.title));
   } catch (enrichErr) {
